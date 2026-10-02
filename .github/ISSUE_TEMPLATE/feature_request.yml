@@ -1,0 +1,18 @@
+name: Feature request
+description: Suggest a useful improvement or platform feature
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the user need or problem, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested behavior
+      description: Include relevant platform/architecture and alternatives you considered.
+    validations:
+      required: true

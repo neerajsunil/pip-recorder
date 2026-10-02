@@ -1,0 +1,1 @@
+Intel libvpl API headers, MIT license, commit 674d015bcb294bc39fa276e99a652ea045423e82. Used only for a small ABI-safe bridge to the installed Intel hardware runtime; no runtime is bundled.

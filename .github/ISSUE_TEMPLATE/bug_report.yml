@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a recording, audio, UI or compatibility problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Please search existing issues first. Review images/logs for private information. Security problems should be reported through SECURITY.md."
+  - type: input
+    id: version
+    attributes:
+      label: FastRecorder version
+      placeholder: "0.1.0-alpha.1 or commit SHA"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Computer and recording settings
+      description: OS/build, CPU architecture, GPU/driver, codec, resolution/FPS, and enabled audio devices (names only).
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you click? What happened, and what should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Error details or screenshots
+      description: Paste relevant Details/Info content. For a UI issue, note whether --software-ui helps. Remove private paths and device IDs.

@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/app", "crates/core", "crates/windows"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0-alpha.1"
+edition = "2024"
+license = "GPL-3.0-only"
+
+[workspace.dependencies]
+fastrecorder-core = { path = "crates/core" }
+fastrecorder-windows = { path = "crates/windows" }
+slint = { version = "~1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-femtovg-wgpu", "renderer-software", "accessibility", "compat-1-18", "raw-window-handle-06", "unstable-winit-030"] }
+windows = { version = "0.62.2", features = ["Foundation", "Security_Authorization_AppCapabilityAccess", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dwm", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Media_MediaFoundation", "Win32_Media_Audio", "Win32_Devices_FunctionDiscovery", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Performance", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

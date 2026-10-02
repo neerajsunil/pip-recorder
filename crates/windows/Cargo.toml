@@ -1,0 +1,17 @@
+[package]
+name = "fastrecorder-windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+diagnostics = []
+
+[dependencies]
+fastrecorder-core.workspace = true
+windows.workspace = true
+libloading = "0.8.9"
+rav1e = { version = "0.8.1", default-features = false, features = ["threading"] }
+
+[build-dependencies]
+cc = "1"

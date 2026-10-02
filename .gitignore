@@ -1,0 +1,7 @@
+/target/
+*.partial.mp4
+*.aac.partial
+*.log
+/.local/
+/dist/
+__pycache__/
