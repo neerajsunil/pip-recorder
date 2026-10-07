@@ -14,6 +14,7 @@ mod api;
 mod session;
 mod slot;
 
+use fastrecorder_core::{EncoderTuning, Multipass};
 pub(crate) use session::probe_codec;
 use session::{Session, codec_guid};
 use slot::Slot;
@@ -69,37 +70,50 @@ fn buffer_count(frame_interval: i32, lookahead_depth: u16) -> usize {
     }
 }
 
+/// What the user asked NVENC for; capability checks and driver retries may
+/// reduce optional enhancements, and Info reports every adjustment.
+pub(crate) struct NvencRequest {
+    pub fps: u32,
+    /// Target bitrate in bits per second.
+    pub bitrate: u32,
+    pub preset_index: u32,
+    pub keyframe_seconds: u32,
+    pub constant_bitrate: bool,
+    pub quality_qp: Option<u32>,
+    pub tuning: EncoderTuning,
+}
+
 impl Nvenc {
-    #[allow(clippy::too_many_arguments)] // Explicit NVENC initialization parameters.
     pub fn new(
         device: &ID3D11Device,
         context: &ID3D11DeviceContext,
         path: &Path,
         width: u32,
         height: u32,
-        fps: u32,
-        bitrate: u32,
-        preset_index: u32,
-        keyframe_seconds: u32,
-        constant_bitrate: bool,
-        quality_qp: Option<u32>,
+        request: &NvencRequest,
         codec: Codec,
     ) -> Result<Self, String> {
+        let low_latency = request.tuning.low_latency;
+        let lookahead_limit = if request.tuning.lookahead && !low_latency {
+            16
+        } else {
+            0
+        };
+        let b_frame_limit = if low_latency {
+            0
+        } else {
+            request.tuning.b_frames.map_or(2, |b| b as i32)
+        };
         Self::new_with_limits(
             device,
             context,
             path,
             width,
             height,
-            fps,
-            bitrate,
-            preset_index,
-            keyframe_seconds,
-            constant_bitrate,
-            quality_qp,
+            request,
             codec,
-            16,
-            2,
+            lookahead_limit,
+            b_frame_limit,
         )
     }
     #[allow(clippy::too_many_arguments)] // Limits apply only to bounded resource-allocation retries.
@@ -109,16 +123,25 @@ impl Nvenc {
         path: &Path,
         width: u32,
         height: u32,
-        fps: u32,
-        bitrate: u32,
-        preset_index: u32,
-        keyframe_seconds: u32,
-        constant_bitrate: bool,
-        quality_qp: Option<u32>,
+        request: &NvencRequest,
         codec: Codec,
         lookahead_limit: u16,
         b_frame_limit: i32,
     ) -> Result<Self, String> {
+        let NvencRequest {
+            fps,
+            bitrate,
+            preset_index,
+            keyframe_seconds,
+            constant_bitrate,
+            quality_qp,
+            ref tuning,
+        } = *request;
+        let tuning_info = if tuning.low_latency {
+            NV_ENC_TUNING_INFO::NV_ENC_TUNING_INFO_LOW_LATENCY
+        } else {
+            NV_ENC_TUNING_INFO::NV_ENC_TUNING_INFO_HIGH_QUALITY
+        };
         let session = Rc::new(Session::open(device)?);
         session.codec_supported(codec)?;
         let mut adjustments = Vec::new();
@@ -128,7 +151,8 @@ impl Nvenc {
                 0
             })
         };
-        let supported_b_frames = capability(NV_ENC_CAPS::NV_ENC_CAPS_NUM_MAX_BFRAMES).clamp(0, 2);
+        let supported_b_frames = capability(NV_ENC_CAPS::NV_ENC_CAPS_NUM_MAX_BFRAMES).clamp(0, 4);
+        let temporal_aq_supported = capability(NV_ENC_CAPS::NV_ENC_CAPS_SUPPORT_TEMPORAL_AQ) > 0;
         let lookahead_supported = capability(NV_ENC_CAPS::NV_ENC_CAPS_SUPPORT_LOOKAHEAD) > 0;
         let b_ref_capability = capability(NV_ENC_CAPS::NV_ENC_CAPS_SUPPORT_BFRAME_REF_MODE);
         // Bound our NV12 ring's estimated memory to 192 MiB (encoder-internal
@@ -152,13 +176,13 @@ impl Nvenc {
                 })
                 .unwrap_or(0)
         };
-        if b_frames < 2 {
+        if b_frames < b_frame_limit {
             adjustments.push(format!(
                 "Using {b_frames} B-frames for {} within driver and buffer limits.",
                 codec.name()
             ));
         }
-        if lookahead == 0 {
+        if lookahead == 0 && lookahead_limit > 0 {
             adjustments.push(if lookahead_supported {
                     "Lookahead disabled to limit the GPU buffer footprint or after an allocation fallback.".into()
             } else {
@@ -194,7 +218,7 @@ impl Nvenc {
                 session.handle,
                 codec_guid(codec),
                 preset_guid,
-                NV_ENC_TUNING_INFO::NV_ENC_TUNING_INFO_HIGH_QUALITY,
+                tuning_info,
                 &mut preset,
             ))?;
             let mut config = preset.presetCfg;
@@ -213,6 +237,8 @@ impl Nvenc {
             config.rcParams.averageBitRate = bitrate;
             config.rcParams.maxBitRate = if constant_bitrate {
                 bitrate
+            } else if tuning.max_bitrate_mbps > 0 {
+                (tuning.max_bitrate_mbps * 1_000_000).max(bitrate)
             } else {
                 bitrate.saturating_mul(2)
             };
@@ -237,13 +263,30 @@ impl Nvenc {
                 config.rcParams.vbvInitialDelay = 0;
             }
             config.rcParams.set_zeroReorderDelay(0);
-            config.rcParams.set_enableAQ(1);
+            config.rcParams.set_enableAQ(u32::from(tuning.spatial_aq));
             config.rcParams.set_aqStrength(0); // Driver selects the strength.
-            config.rcParams.set_enableTemporalAQ(0);
-            config.rcParams.multiPass = if quality_qp.is_some() {
-                NV_ENC_MULTI_PASS::NV_ENC_MULTI_PASS_DISABLED
-            } else {
-                NV_ENC_MULTI_PASS::NV_ENC_TWO_PASS_QUARTER_RESOLUTION
+            let temporal_aq = tuning.temporal_aq && temporal_aq_supported && lookahead != 0;
+            if tuning.temporal_aq && !temporal_aq {
+                adjustments.push(
+                    if temporal_aq_supported {
+                        "Temporal AQ needs lookahead; it is off for this recording."
+                    } else {
+                        "Driver does not support temporal AQ for this codec."
+                    }
+                    .into(),
+                );
+            }
+            config.rcParams.set_enableTemporalAQ(u32::from(temporal_aq));
+            config.rcParams.multiPass = match (quality_qp, tuning.multipass) {
+                (Some(_), _) | (None, Multipass::Off) => {
+                    NV_ENC_MULTI_PASS::NV_ENC_MULTI_PASS_DISABLED
+                }
+                (None, Multipass::QuarterResolution) => {
+                    NV_ENC_MULTI_PASS::NV_ENC_TWO_PASS_QUARTER_RESOLUTION
+                }
+                (None, Multipass::FullResolution) => {
+                    NV_ENC_MULTI_PASS::NV_ENC_TWO_PASS_FULL_RESOLUTION
+                }
             };
             match codec {
                 Codec::Av1 => {
@@ -294,7 +337,7 @@ impl Nvenc {
             init.bufferFormat = NV_ENC_BUFFER_FORMAT::NV_ENC_BUFFER_FORMAT_NV12;
             init.enablePTD = 1;
             init.encodeConfig = &mut config;
-            init.tuningInfo = NV_ENC_TUNING_INFO::NV_ENC_TUNING_INFO_HIGH_QUALITY;
+            init.tuningInfo = tuning_info;
             let initialize = session
                 .api
                 .nvEncInitializeEncoder
@@ -399,12 +442,7 @@ impl Nvenc {
                         path,
                         width,
                         height,
-                        fps,
-                        bitrate,
-                        preset_index,
-                        keyframe_seconds,
-                        constant_bitrate,
-                        quality_qp,
+                        request,
                         codec,
                         next_depth,
                         next_b_frames,
@@ -433,23 +471,32 @@ impl Nvenc {
                 codec,
                 fallback: (!adjustments.is_empty()).then(|| adjustments.join(" ")),
                 label: format!(
-                    "NVIDIA NVENC · {} · P{preset_index} HQ · {} · {} · {} B-frames · lookahead {} · B-reference {}",
+                    "NVIDIA NVENC · {} · P{preset_index} {} · {} · {} · {} B-frames · lookahead {} · B-reference {}",
                     codec.name(),
-                    if config.rcParams.enableAQ() != 0 {
-                        "spatial AQ"
+                    if tuning.low_latency {
+                        "low latency"
                     } else {
-                        "AQ off"
+                        "HQ"
+                    },
+                    match (
+                        config.rcParams.enableAQ() != 0,
+                        config.rcParams.enableTemporalAQ() != 0,
+                    ) {
+                        (true, true) => "spatial + temporal AQ",
+                        (true, false) => "spatial AQ",
+                        (false, true) => "temporal AQ",
+                        (false, false) => "AQ off",
                     },
                     quality_qp.map_or_else(
                         || format!(
                             "{} · {}",
                             if constant_bitrate { "CBR" } else { "VBR" },
-                            if config.rcParams.multiPass
-                                == NV_ENC_MULTI_PASS::NV_ENC_MULTI_PASS_DISABLED
-                            {
-                                "single pass"
-                            } else {
-                                "two-pass quarter"
+                            match config.rcParams.multiPass {
+                                NV_ENC_MULTI_PASS::NV_ENC_MULTI_PASS_DISABLED => "single pass",
+                                NV_ENC_MULTI_PASS::NV_ENC_TWO_PASS_FULL_RESOLUTION => {
+                                    "two-pass full"
+                                }
+                                _ => "two-pass quarter",
                             }
                         ),
                         |qp| format!("CQP {qp} · single pass")

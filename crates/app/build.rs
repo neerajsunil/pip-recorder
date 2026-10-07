@@ -5,12 +5,12 @@ fn main() {
         winresource::WindowsResource::new()
             .set_icon("assets/fastrecorder.ico")
             .set_manifest_file("assets/windows.manifest")
-            .set("ProductName", "FastRecorder")
-            .set("FileDescription", "FastRecorder screen recorder")
+            .set("ProductName", "Pip")
+            .set("FileDescription", "Pip screen recorder")
             .set("OriginalFilename", "fastrecorder.exe")
             .set(
                 "LegalCopyright",
-                "Copyright © 2026 FastRecorder contributors. GPL-3.0-only.",
+                "Copyright © 2026 Pip contributors. GPL-3.0-only.",
             )
             .compile()
             .expect("Windows icon, manifest and version resources must compile");

@@ -25,6 +25,7 @@ mod files;
 mod gpu;
 mod pipeline;
 mod preview;
+mod preview_surface;
 mod shell;
 mod shortcut;
 #[cfg(feature = "diagnostics")]
@@ -38,9 +39,11 @@ pub use files::{default_recording_directory, preferences_path, save_preferences}
 pub use gpu::{GpuInfo, gpu_inventory};
 pub use pipeline::{Recording, RecordingEvent};
 pub use preview::{Preview, PreviewChannel, PreviewFrame};
+pub use preview_surface::PreviewSurface;
 pub use shell::{
-    UiApartment, choose_destination, dark_titlebar, exclude_from_capture, initialize_ui,
-    open_recording, reveal_recording, show_details, timestamped_destination,
+    UiApartment, choose_folder, exclude_from_capture, initialize_ui, open_folder, open_recording,
+    open_url, reveal_recording, set_dark_titlebar, set_process_priority, show_details,
+    system_prefers_dark, timestamped_destination,
 };
 pub use shortcut::{RecordingShortcut, ShortcutAction};
 #[cfg(feature = "diagnostics")]

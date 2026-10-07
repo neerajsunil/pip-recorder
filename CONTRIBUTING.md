@@ -1,12 +1,12 @@
-# Contributing to FastRecorder
+# Contributing to Pip
 
-Thanks for helping make a simple screen recorder accessible to everyone.
+Thanks for helping make a simple, friendly screen recorder for everyone. First contribution? Look for [good first issues](https://github.com/neerajsunil/pip-recorder/contribute), or say hi in [Discussions](https://github.com/neerajsunil/pip-recorder/discussions) to find a place to start.
 
 ## Before changing code
 
 For a small fix, open a pull request. For a new backend, encoding change or significant UI change, open an issue first so the scope and platform behavior can be agreed on. Search existing issues before submitting a duplicate. Follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-The default studio should be understandable without technical knowledge. Put encoder/vendor details, rate control and diagnostics in Settings/Info. Keep recording work away from the UI thread and keep buffers bounded. A buildable UI on another platform does not establish recording support; update the README platform table only when the complete backend and release are verified.
+The default studio should be understandable without technical knowledge. UI colours, radii and the product name live in `crates/app/ui/theme.slint`; use those tokens instead of literal colours. Pip (`components/pip.slint`) reacts to the studio's state, so keep its moods meaningful rather than decorative. Copy should be short, warm and plain: say what happened and what to do next. Put encoder/vendor details, rate control and diagnostics in Settings/Info. Keep recording work away from the UI thread and keep buffers bounded. A buildable UI on another platform does not establish recording support; update the README platform table only when the complete backend and release are verified.
 
 ## Where code lives
 
@@ -18,6 +18,8 @@ Windows contributors need stable Rust, the MSVC x64 toolchain, Visual Studio C++
 
 ```powershell
 cargo build -p fastrecorder --locked
+# Optimized but quick to rebuild, for trying changes (target/fast/fastrecorder.exe):
+cargo build -p fastrecorder --profile fast --locked
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --features diagnostics --locked -- -D warnings
 ```
@@ -38,8 +40,13 @@ The committed screenshots use the actual Slint UI with a deterministic sample pr
 # Optional: requires Pillow to regenerate the icon and sample preview.
 python scripts/generate-brand.py
 cargo run -p fastrecorder --features diagnostics -- --docs-snapshot docs/images/studio.png --software-ui
-cargo run -p fastrecorder --features diagnostics -- --docs-snapshot docs/images/audio-settings.png --docs-audio --software-ui
+cargo run -p fastrecorder --features diagnostics -- --docs-snapshot docs/images/audio-settings.png --docs-view audio --software-ui
+cargo run -p fastrecorder --features diagnostics -- --docs-snapshot docs/images/community.png --docs-view community --software-ui
+cargo run -p fastrecorder --features diagnostics -- --docs-snapshot docs/images/studio-dark.png --docs-dark --software-ui
+cargo run -p fastrecorder --features diagnostics -- --docs-snapshot docs/images/settings-advanced.png --docs-view video-advanced --software-ui
 ```
+
+Other `--docs-view` values preview each studio state without capturing anything: `video`, `recording-settings`, `appearance`, `sources`, `recording`, `countdown`, `saved`, `napping` and `oops`. Add `--docs-dark` for dark mode, `--docs-advanced` to show Advanced options on the audio page, and `--docs-height 1750` to capture a whole settings page. Self-test recordings accept `--nvenc-max`, `--nvenc-low-latency` and `--plays-everywhere` to exercise encoder options. For performance work, `--profile-record SECONDS --profile-output FILE` records the selected display (add `--profile-no-lookahead`, `--profile-no-multipass` or `--profile-no-bframes`), `--profile-no-preview` and `--profile-no-audio` isolate idle costs, and `--profile-visible` allows screenshots of the studio. Measure with a release build (`cargo build --release --features diagnostics`). New settings belong in the Simple layer only if most people need them; everything else goes behind Advanced.
 
 ## Release process
 

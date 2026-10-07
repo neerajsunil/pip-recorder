@@ -135,12 +135,14 @@ fn sdr_white(device_name: &[u16; 32]) -> Option<f32> {
     None
 }
 
+/// Turns a captured frame into 8-bit BGRA at `output`. SDR frames already are,
+/// so they are copied; FP16 (HDR) frames go through the tone-mapping shader,
+/// whose FP16 staging texture is only allocated when first needed.
 pub(crate) struct ColorConverter {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
-    input: ID3D11Texture2D,
+    input: std::cell::OnceCell<(ID3D11Texture2D, ID3D11ShaderResourceView)>,
     pub output: ID3D11Texture2D,
-    input_view: ID3D11ShaderResourceView,
     output_view: ID3D11RenderTargetView,
     vertex: ID3D11VertexShader,
     pixel: ID3D11PixelShader,
@@ -155,15 +157,6 @@ impl ColorConverter {
         width: u32,
         height: u32,
     ) -> Result<Self> {
-        let input = texture(
-            device,
-            width,
-            height,
-            DXGI_FORMAT_R16G16B16A16_FLOAT,
-            D3D11_USAGE_DEFAULT,
-            D3D11_BIND_SHADER_RESOURCE.0 as u32,
-            0,
-        )?;
         let output = texture(
             device,
             width,
@@ -173,10 +166,8 @@ impl ColorConverter {
             D3D11_BIND_RENDER_TARGET.0 as u32,
             0,
         )?;
-        let (mut input_view, mut output_view, mut vertex, mut pixel, mut constants) =
-            (None, None, None, None, None);
+        let (mut output_view, mut vertex, mut pixel, mut constants) = (None, None, None, None);
         unsafe {
-            device.CreateShaderResourceView(&input, None, Some(&mut input_view))?;
             device.CreateRenderTargetView(&output, None, Some(&mut output_view))?;
             device.CreateVertexShader(
                 include_bytes!(concat!(env!("OUT_DIR"), "/color-vertex.cso")),
@@ -202,9 +193,8 @@ impl ColorConverter {
         Ok(Self {
             device: device.clone(),
             context: context.clone(),
-            input,
+            input: std::cell::OnceCell::new(),
             output,
-            input_view: input_view.unwrap(),
             output_view: output_view.unwrap(),
             vertex: vertex.unwrap(),
             pixel: pixel.unwrap(),
@@ -220,20 +210,50 @@ impl ColorConverter {
             if desc.Width < self.width || desc.Height < self.height {
                 return Ok(false);
             }
-            if desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT {
-                return Err(Error::new(
-                    HRESULT(0x80004005u32 as i32),
-                    "Unexpected capture color format. Choose the source again.",
-                ));
-            }
             let region = D3D11_BOX {
                 right: self.width,
                 bottom: self.height,
                 back: 1,
                 ..Default::default()
             };
+            if desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM {
+                self.context.CopySubresourceRegion(
+                    &self.output,
+                    0,
+                    0,
+                    0,
+                    0,
+                    input,
+                    0,
+                    Some(&region),
+                );
+                self.context.Flush();
+                return Ok(true);
+            }
+            if desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT {
+                return Err(Error::new(
+                    HRESULT(0x80004005u32 as i32),
+                    "Unexpected capture color format. Choose the source again.",
+                ));
+            }
+            if self.input.get().is_none() {
+                let staging = texture(
+                    &self.device,
+                    self.width,
+                    self.height,
+                    DXGI_FORMAT_R16G16B16A16_FLOAT,
+                    D3D11_USAGE_DEFAULT,
+                    D3D11_BIND_SHADER_RESOURCE.0 as u32,
+                    0,
+                )?;
+                let mut view = None;
+                self.device
+                    .CreateShaderResourceView(&staging, None, Some(&mut view))?;
+                let _ = self.input.set((staging, view.unwrap()));
+            }
+            let (staging, staging_view) = self.input.get().unwrap();
             self.context
-                .CopySubresourceRegion(&self.input, 0, 0, 0, 0, input, 0, Some(&region));
+                .CopySubresourceRegion(staging, 0, 0, 0, 0, input, 0, Some(&region));
             let constants = [color.white, if color.hdr { 1. } else { 0. }, 0., 0.];
             self.context.UpdateSubresource(
                 &self.constants,
@@ -251,7 +271,7 @@ impl ColorConverter {
             self.context
                 .PSSetConstantBuffers(0, Some(&[Some(self.constants.clone())]));
             self.context
-                .PSSetShaderResources(0, Some(&[Some(self.input_view.clone())]));
+                .PSSetShaderResources(0, Some(&[Some(staging_view.clone())]));
             self.context
                 .OMSetRenderTargets(Some(&[Some(self.output_view.clone())]), None);
             self.context.RSSetViewports(Some(&[D3D11_VIEWPORT {

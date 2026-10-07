@@ -1,0 +1,33 @@
+import { Theme } from "../theme.slint";
+import { AudioMeter } from "audio-meter.slint";
+
+// Studio audio toggle: icon, name and live level in one pill.
+export component AudioChip inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <float> level;
+    in property <bool> failed;
+    in property <bool> enabled: true;
+    in-out property <bool> checked;
+    callback toggled();
+    forward-focus: focus;
+    accessible-role: checkbox; accessible-label: text; accessible-checked: checked; accessible-enabled: enabled;
+    accessible-action-default => { if root.enabled { root.checked = !root.checked; root.toggled(); } }
+    height: 40px; border-radius: self.height / 2;
+    min-width: 14px + 18px + 10px + name.preferred-width + 12px + 44px + 16px;
+    preferred-width: self.min-width;
+    horizontal-stretch: 0;
+    background: root.checked ? (touch.has-hover ? Theme.lilac-soft.darker(3%) : Theme.lilac-soft) : touch.has-hover ? Theme.hover : Theme.surface;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus || root.checked ? Theme.lilac-line : Theme.line-strong;
+    opacity: enabled ? 1 : 0.6;
+    animate background { duration: 120ms; }
+    HorizontalLayout { padding-left: 14px; padding-right: 16px; spacing: 10px; alignment: start;
+        Image { source: root.icon; width: 18px; height: 18px; y: (parent.height - self.height) / 2; colorize: root.failed && root.checked ? Theme.danger-ink : root.checked ? Theme.accent-ink : Theme.ink-faint; }
+        name := Text { text: root.text; color: root.checked ? Theme.ink : Theme.ink-soft; font-size: 13px; font-weight: 500; vertical-alignment: center; }
+        Rectangle { width: 2px; }
+        AudioMeter { width: 44px; y: (parent.height - self.height) / 2; level: root.level; enabled: root.checked; failed: root.failed; }
+    }
+    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if (event.text == " " || event.text == Key.Return) { root.checked = !root.checked; root.toggled(); return accept; } return reject; } }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.checked = !root.checked; root.toggled(); } }
+}

@@ -7,7 +7,7 @@ use windows::{
     core::Result as WinResult,
 };
 
-fn aac_media_type() -> WinResult<IMFMediaType> {
+fn aac_media_type(kbps: u32) -> WinResult<IMFMediaType> {
     unsafe {
         let media = MFCreateMediaType()?;
         media.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)?;
@@ -15,7 +15,7 @@ fn aac_media_type() -> WinResult<IMFMediaType> {
         media.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, 2)?;
         media.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, RATE)?;
         media.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16)?;
-        media.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 24_000)?;
+        media.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, kbps * 125)?;
         media.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, 1)?;
         media.SetUINT32(&MF_MT_AAC_PAYLOAD_TYPE, 0)?;
         media.SetUINT32(&MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29)?;
@@ -47,7 +47,7 @@ pub(super) struct AacEncoder {
     pub(super) first_time: Option<i64>,
 }
 impl AacEncoder {
-    pub(super) fn new(path: &Path) -> WinResult<Self> {
+    pub(super) fn new(path: &Path, kbps: u32) -> WinResult<Self> {
         unsafe {
             let transform: IMFTransform =
                 CoCreateInstance(&AACMFTEncoder, None, CLSCTX_INPROC_SERVER)?;
@@ -60,7 +60,7 @@ impl AacEncoder {
             input.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, 4)?;
             input.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, RATE * 4)?;
             transform.SetInputType(0, &input, 0)?;
-            transform.SetOutputType(0, &aac_media_type()?, 0)?;
+            transform.SetOutputType(0, &aac_media_type(kbps)?, 0)?;
             transform.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0)?;
             transform.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0)?;
             let file = File::options().create_new(true).write(true).open(path)?;

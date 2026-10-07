@@ -44,7 +44,9 @@ impl VideoEncoder {
         let vendor = unsafe { adapter.GetAdapter().and_then(|a| a.GetDesc()) }
             .map_err(|e| e.to_string())?
             .VendorId;
-        let candidates: Vec<fastrecorder_core::Codec> = if automatic {
+        let candidates: Vec<fastrecorder_core::Codec> = if automatic && config.prefer_h264 {
+            vec![fastrecorder_core::Codec::H264]
+        } else if automatic {
             vec![
                 fastrecorder_core::Codec::Av1,
                 fastrecorder_core::Codec::Hevc,
@@ -63,19 +65,17 @@ impl VideoEncoder {
         {
             if vendor == 0x10de {
                 for codec in &candidates {
+                    let request = crate::encode::nvenc::NvencRequest {
+                        fps: config.fps,
+                        bitrate: config.bitrate_for(*codec, width, height) * 1_000_000,
+                        preset_index: config.nvenc_preset,
+                        keyframe_seconds: config.keyframe_seconds,
+                        constant_bitrate: config.constant_bitrate,
+                        quality_qp: config.quality_qp,
+                        tuning: config.tuning.clone(),
+                    };
                     match crate::encode::nvenc::Nvenc::new(
-                        device,
-                        context,
-                        path,
-                        width,
-                        height,
-                        config.fps,
-                        config.bitrate_for(*codec, width, height) * 1_000_000,
-                        config.nvenc_preset,
-                        config.keyframe_seconds,
-                        config.constant_bitrate,
-                        config.quality_qp,
-                        *codec,
+                        device, context, path, width, height, &request, *codec,
                     ) {
                         Ok(mut encoder) => {
                             encoder.fallback = match (fallback, encoder.fallback.take()) {

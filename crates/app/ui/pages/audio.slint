@@ -1,12 +1,17 @@
-import { CheckBox, ComboBox, SpinBox } from "std-widgets.slint";
+import { ComboBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { ActionButton } from "../components/action-button.slint";
 import { AudioMeter } from "../components/audio-meter.slint";
-import { Divider, FieldLabel, Hint, SectionTitle, Warning } from "../components/labels.slint";
+import { Divider, Hint, Warning } from "../components/labels.slint";
+import { SettingGroup, SettingRow } from "../components/setting-row.slint";
+import { Switch } from "../components/switch.slint";
+import { VolumeSlider } from "../components/volume-slider.slint";
 
-// One audio source: enable toggle, live meter, device and volume.
-component AudioSource inherits VerticalLayout {
-    in property <string> toggle-label;
-    in property <string> device-label;
+// One audio source: on/off with a live meter, device and recording volume.
+component AudioSource inherits SettingGroup {
+    in property <string> name;
+    in property <string> toggle-title;
+    in property <string> device-help;
     in property <bool> busy;
     in property <bool> audio-ready;
     in property <float> level;
@@ -16,23 +21,26 @@ component AudioSource inherits VerticalLayout {
     in-out property <int> device;
     in-out property <int> volume;
     callback settings-changed();
-    alignment: start; spacing: 16px;
-    CheckBox { text: root.toggle-label; checked <=> root.checked; enabled: !root.busy; toggled => { root.settings-changed(); } }
-    AudioMeter { width: 200px; level: root.level; enabled: root.checked; failed: root.error != ""; }
+    title: root.name;
+    SettingRow { title: root.toggle-title; description: root.checked ? "Speak or play something to check the level." : "Off. Turn on to include it in your recordings.";
+        HorizontalLayout { spacing: 14px; alignment: end;
+            AudioMeter { width: 90px; y: 11px; level: root.level; enabled: root.checked; failed: root.error != ""; }
+            Switch { text: ""; checked <=> root.checked; enabled: !root.busy; toggled => { root.settings-changed(); } }
+        }
+    }
     if root.checked && root.error != "": Warning { text: root.error; }
-    VerticalLayout { spacing: 7px;
-        FieldLabel { text: root.device-label; }
+    SettingRow { title: "Device"; description: root.device-help;
         ComboBox { model: root.devices; current-index <=> root.device; enabled: !root.busy && root.audio-ready; selected => { root.settings-changed(); } }
     }
-    VerticalLayout { spacing: 7px;
-        FieldLabel { text: "Recording volume (%)"; }
-        SpinBox { value <=> root.volume; minimum: 0; maximum: 200; enabled: !root.busy; edited => { root.settings-changed(); } }
+    SettingRow { title: "Volume"; description: "Only changes the recording, not what you hear. Double-click to reset.";
+        VolumeSlider { value <=> root.volume; label: root.name + " recording volume"; enabled: !root.busy; edited => { root.settings-changed(); } }
     }
 }
 
-// Settings → Audio: desktop (loopback) and microphone sources.
+// Settings → Audio: desktop (loopback) and microphone sources, plus encoding quality.
 export component AudioPage inherits VerticalLayout {
     in property <bool> busy;
+    in property <bool> advanced;
     in property <bool> audio-ready;
     in property <string> audio-status;
     in property <[string]> desktop-audio-devices;
@@ -47,28 +55,35 @@ export component AudioPage inherits VerticalLayout {
     in-out property <int> microphone-audio-device;
     in-out property <int> desktop-volume;
     in-out property <int> microphone-volume;
+    in-out property <int> audio-bitrate;
     callback settings-changed();
     callback refresh-audio-devices();
-    alignment: start; spacing: 16px;
-    HorizontalLayout { height: 32px;
-        SectionTitle { text: "Desktop audio"; vertical-alignment: center; }
-        Rectangle { horizontal-stretch: 1; }
-        ActionButton { width: 32px; height: 32px; icon: @image-url("../icons/refresh-cw.svg"); label: "Refresh audio devices"; enabled: !root.busy; clicked => { root.refresh-audio-devices(); } }
-    }
+    alignment: start; spacing: 22px;
     AudioSource {
-        toggle-label: "Record desktop audio"; device-label: "Playback device";
+        name: "Desktop audio"; toggle-title: "Record desktop audio"; device-help: "Sound from apps, games and videos on this device.";
         busy: root.busy; audio-ready: root.audio-ready; level: root.desktop-level; error: root.desktop-audio-error; devices: root.desktop-audio-devices;
         checked <=> root.desktop-audio; device <=> root.desktop-audio-device; volume <=> root.desktop-volume;
         settings-changed => { root.settings-changed(); }
     }
     Divider { }
-    SectionTitle { text: "Microphone"; }
     AudioSource {
-        toggle-label: "Record microphone"; device-label: "Input device";
+        name: "Microphone"; toggle-title: "Record your microphone"; device-help: "Your voice. Headsets and USB microphones appear here.";
         busy: root.busy; audio-ready: root.audio-ready; level: root.microphone-level; error: root.microphone-audio-error; devices: root.microphone-audio-devices;
         checked <=> root.microphone-audio; device <=> root.microphone-audio-device; volume <=> root.microphone-volume;
         settings-changed => { root.settings-changed(); }
     }
     if root.audio-status != "": Warning { text: root.audio-status; }
-    Hint { text: "Enabled sources are mixed into one stereo audio track."; }
+    HorizontalLayout { spacing: 12px; height: 32px;
+        Hint { text: "Plugged something in? Refresh to see new devices."; vertical-alignment: center; }
+        ActionButton { width: 104px; height: 32px; pill: true; text: "Refresh"; icon: @image-url("../icons/refresh-cw.svg"); icon-size: 15px; enabled: !root.busy; clicked => { root.refresh-audio-devices(); } }
+    }
+    if root.advanced: Divider { }
+    if root.advanced: SettingGroup { title: "Audio encoding"; advanced: true;
+        SettingRow { title: "Audio quality"; description: "Stereo AAC at 48 kHz. Both sources are mixed into one track.";
+            ComboBox { model: ["96 kbps · smallest", "128 kbps", "160 kbps", "192 kbps · best"]; enabled: !root.busy;
+                current-index: root.audio-bitrate == 96 ? 0 : root.audio-bitrate == 128 ? 1 : root.audio-bitrate == 160 ? 2 : 3;
+                selected => { root.audio-bitrate = [96, 128, 160, 192][self.current-index]; root.settings-changed(); }
+            }
+        }
+    }
 }

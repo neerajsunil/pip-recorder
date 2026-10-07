@@ -7,9 +7,9 @@ use crate::Codec;
 pub fn recommended_bitrate_mbps(codec: Codec, width: u32, height: u32, fps: u32) -> u32 {
     let pixels = f64::from(width.max(1)) * f64::from(height.max(1));
     let rates = match codec {
-        Codec::Av1 => [4.0, 6.0, 12.0],
-        Codec::Hevc => [5.0, 8.0, 16.0],
-        Codec::H264 => [8.0, 12.0, 24.0],
+        Codec::Av1 => [5.0, 8.0, 15.0],
+        Codec::Hevc => [6.0, 10.0, 18.0],
+        Codec::H264 => [10.0, 15.0, 28.0],
     };
     let areas = [1920.0 * 1080.0, 2560.0 * 1440.0, 3840.0 * 2160.0];
     let rate = if pixels < areas[0] {
@@ -31,7 +31,7 @@ mod tests {
     #[test]
     fn recommended_bitrate_scales_with_resolution_and_frame_rate() {
         let hd = recommended_bitrate_mbps(Codec::H264, 1920, 1080, 30);
-        assert_eq!(hd, 8);
+        assert_eq!(hd, 10);
         assert!(recommended_bitrate_mbps(Codec::H264, 3840, 2160, 30) > hd);
         assert!(recommended_bitrate_mbps(Codec::H264, 1920, 1080, 60) > hd);
         assert!(recommended_bitrate_mbps(Codec::Av1, 1920, 1080, 30) < hd);

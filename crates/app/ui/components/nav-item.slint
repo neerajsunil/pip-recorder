@@ -1,0 +1,21 @@
+import { Theme } from "../theme.slint";
+
+// One entry in the settings sidebar.
+export component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> selected;
+    callback clicked();
+    forward-focus: focus;
+    accessible-role: tab; accessible-label: text; accessible-item-selected: selected;
+    height: 38px; border-radius: Theme.radius-s;
+    background: selected ? Theme.lilac-soft : touch.has-hover ? Theme.hover : transparent;
+    border-width: focus.has-focus ? 2px : 0px; border-color: Theme.lilac;
+    animate background { duration: 110ms; }
+    HorizontalLayout { padding-left: 12px; padding-right: 12px; spacing: 10px;
+        Image { source: root.icon; width: 17px; height: 17px; y: (parent.height - self.height) / 2; colorize: root.selected ? Theme.accent-ink : Theme.ink-soft; }
+        Text { text: root.text; color: root.selected ? Theme.accent-ink : Theme.ink; font-size: 13px; font-weight: root.selected ? 600 : 500; vertical-alignment: center; }
+    }
+    focus := FocusScope { key-pressed(event) => { if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; } return reject; } }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}

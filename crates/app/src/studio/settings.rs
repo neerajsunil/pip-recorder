@@ -9,7 +9,11 @@ use slint::{ComponentHandle, Timer, TimerMode};
 use std::{rc::Rc, time::Duration};
 
 pub(super) fn persist_preferences(ui: &MainWindow, state: &AppState) {
-    if !ui.get_hardware_ready() || (cli::flag("--snapshot") || cli::flag("--self-test-record")) {
+    if !ui.get_hardware_ready()
+        || (cli::flag("--snapshot")
+            || cli::flag("--self-test-record")
+            || cli::flag("--profile-record"))
+    {
         return;
     }
     let gpu = (ui.get_gpu_choice() > 0)
@@ -62,7 +66,11 @@ pub(super) fn install(ui: &MainWindow, state: &Shared) -> Rc<Timer> {
                 state.microphone_device = Some(device.id.clone());
             }
             state.preview_channel.set_cursor(ui.get_capture_cursor());
+            fastrecorder_platform::set_process_priority(ui.get_process_priority());
             update_encoding_labels(&ui, &state);
+            if !state.custom_destination {
+                super::destination::assign_destination(&ui, &mut state);
+            }
             drop(state);
             let save_weak = ui.as_weak();
             let save_state = settings_state.clone();

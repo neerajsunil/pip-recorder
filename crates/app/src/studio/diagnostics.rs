@@ -17,6 +17,61 @@ pub(super) fn install(ui: &MainWindow, state: Shared) {
         ui.set_settings_open(true);
         ui.set_info_open(true);
     }
+    // Profiling switches: isolate the cost of the preview and audio meters.
+    if args.iter().any(|arg| arg == "--profile-no-preview") {
+        ui.set_preview_enabled(false);
+    }
+    if args.iter().any(|arg| arg == "--profile-no-audio") {
+        ui.set_desktop_audio(false);
+        ui.set_microphone_audio(false);
+    }
+    // Records the selected display for N seconds into PATH, for memory/CPU profiling.
+    if let (Some(seconds), Some(path)) = (
+        cli::value("--profile-record").and_then(|s| s.parse::<u64>().ok()),
+        cli::value("--profile-output"),
+    ) {
+        let weak = ui.as_weak();
+        let profile_state = state.clone();
+        Timer::single_shot(Duration::from_secs(5), move || {
+            let Some(ui) = weak.upgrade() else { return };
+            {
+                let mut state = profile_state.locked();
+                state.destination = Some(PathBuf::from(&path));
+                state.custom_destination = true;
+            }
+            ui.set_countdown_seconds(0);
+            if cli::flag("--profile-no-lookahead") {
+                ui.set_lookahead(false);
+            }
+            if cli::flag("--profile-no-multipass") {
+                ui.set_multipass(0);
+            }
+            if cli::flag("--profile-no-bframes") {
+                ui.set_b_frames(0);
+            }
+            if cli::flag("--profile-software") {
+                ui.set_encoder_choice(7);
+            }
+            ui.invoke_toggle_recording();
+            println!("PROFILE RECORDING");
+            let weak = ui.as_weak();
+            Timer::single_shot(Duration::from_secs(seconds), move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.invoke_toggle_recording();
+                    println!("PROFILE STOPPED");
+                }
+            });
+        });
+    }
+    if let Some(seconds) = cli::value("--profile-open-settings").and_then(|s| s.parse::<u64>().ok())
+    {
+        let weak = ui.as_weak();
+        Timer::single_shot(Duration::from_secs(seconds), move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.invoke_show_settings();
+            }
+        });
+    }
     if args.iter().any(|arg| arg == "--settings-ui") {
         ui.set_settings_open(true);
     }
@@ -105,6 +160,21 @@ pub(super) fn install(ui: &MainWindow, state: Shared) {
             );
             if cli::flag("--60fps") {
                 ui.set_fps(60);
+            }
+            if cli::flag("--nvenc-max") {
+                // Every expert NVENC option at its most demanding setting.
+                ui.set_b_frames(4);
+                ui.set_temporal_aq(true);
+                ui.set_multipass(2);
+                ui.set_max_bitrate(40);
+                ui.set_nvenc_preset(7);
+            }
+            if cli::flag("--plays-everywhere") {
+                ui.set_prefer_h264(true);
+            }
+            if cli::flag("--nvenc-low-latency") {
+                ui.set_low_latency(true);
+                ui.set_constant_bitrate(true);
             }
             let mut app_state = state.locked();
             app_state.source = Some(source);

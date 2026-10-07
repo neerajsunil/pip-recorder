@@ -13,6 +13,7 @@ mod shortcuts;
 mod sources;
 mod state;
 mod surface;
+mod theme;
 
 use crate::{
     MainWindow, cli,
@@ -49,7 +50,8 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
             state.microphone_device = preferences.microphone_device;
             if let Some(directory) = preferences.save_directory {
                 if directory.is_dir() {
-                    state.destination = Some(native::timestamped_destination(&directory));
+                    // A placeholder in the folder; assign_destination names the file.
+                    state.destination = Some(directory.join("pending.mp4"));
                 } else {
                     notify(
                         &ui,
@@ -72,6 +74,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(error) => notify_issue(&ui, "Couldn't load your saved settings.", error),
     }
+    native::set_process_priority(ui.get_process_priority());
     let tray: TrayHandle = Rc::new(RefCell::new(None));
     let timer = recording::install(&ui, &state, &tray);
     ui.set_capture_supported(native::capture_supported());
@@ -85,9 +88,19 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
     let audio_timer = audio::install(&ui, &state);
 
     let weak = ui.as_weak();
+    ui.on_open_link(move |url| {
+        if let Err(error) = native::open_url(&url)
+            && let Some(ui) = weak.upgrade()
+        {
+            notify_issue(&ui, "Couldn't open the link.", error);
+        }
+    });
+
+    let weak = ui.as_weak();
     ui.on_show_details(move || {
         if let Some(ui) = weak.upgrade() {
             ui.set_source_open(false);
+            ui.invoke_cover_preview();
             ui.set_settings_open(true);
             ui.set_info_open(true);
         }
@@ -137,9 +150,8 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
         let state = startup_state;
         refresh_sources(&ui, &state);
         if let Ok(owner) = hwnd(&ui) {
-            native::dark_titlebar(owner);
-            let own_window_diagnostic =
-                cfg!(feature = "diagnostics") && cli::flag("--self-test-record");
+            let own_window_diagnostic = cfg!(feature = "diagnostics")
+                && (cli::flag("--self-test-record") || cli::flag("--profile-visible"));
             if !own_window_diagnostic && let Err(error) = native::exclude_from_capture(owner) {
                 notify_issue(
                     &ui,
@@ -178,12 +190,14 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
     encoding::install(&ui, &state)?;
     let settings_timer = settings::install(&ui, &state);
     let preview_timer = preview::install(&ui, &state);
+    let theme_timer = theme::install(&ui);
     #[cfg(feature = "diagnostics")]
     diagnostics::install(&ui, state.clone());
     slint::run_event_loop()?;
     timer.stop();
     settings_timer.stop();
     preview_timer.stop();
+    theme_timer.stop();
     audio_timer.stop();
     if let Some(mut monitor) = state.locked().audio_monitor.take() {
         monitor.join();

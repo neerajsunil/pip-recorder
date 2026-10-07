@@ -88,7 +88,11 @@ pub(super) fn update_encoding_labels(ui: &MainWindow, state: &AppState) {
     let choice = ui.get_encoder_choice().clamp(0, 8) as usize;
     let (encoder, codec) = if choice == 0 {
         if let Some(gpu) = gpu {
-            let c = gpu.codecs.iter().position(|supported| *supported);
+            let c = if ui.get_prefer_h264() {
+                gpu.codecs[2].then_some(2)
+            } else {
+                gpu.codecs.iter().position(|supported| *supported)
+            };
             match (gpu.vendor, c) {
                 (0x10de, Some(i)) => (
                     ENCODER_NAMES[1 + i],
@@ -118,7 +122,7 @@ pub(super) fn update_encoding_labels(ui: &MainWindow, state: &AppState) {
         if !available {
             "Unavailable on the selected GPU / installed driver. Choose another encoder or GPU."
         } else if choice == 8 {
-            "CPU encoding · rav1e speed 8 · may skip frames if the CPU cannot keep up."
+            "CPU encoding with rav1e. May skip frames if the CPU cannot keep up; a higher speed helps."
         } else if (4..=6).contains(&choice) {
             "Hardware encoding · installed Intel oneVPL / Media SDK runtime · NV12 readback."
         } else {
@@ -147,16 +151,16 @@ pub(super) fn update_encoding_labels(ui: &MainWindow, state: &AppState) {
     ui.set_keyframe_controls(
         encoder.starts_with("NVIDIA") || encoder.starts_with("Intel") || codec == Codec::Av1,
     );
-    ui.set_encoder_tech(if encoder.starts_with("NVIDIA") { format!("NVENC API 12.1 ABI · P{} · HQ / spatial AQ request · {} · up to 2 B-frames · 8–16-frame lookahead / B-reference when supported · {}s keyframes", ui.get_nvenc_preset(), if ui.get_quality_mode() { format!("CQP {} · single pass", ui.get_quality_level()) } else { format!("{} · two-pass quarter resolution", if ui.get_constant_bitrate() { "CBR" } else { "VBR" }) }, ui.get_keyframe_seconds()) }
+    ui.set_encoder_tech(if encoder.starts_with("NVIDIA") { nvenc_summary(ui) }
         else if encoder.starts_with("Intel") { format!("Intel oneVPL / Media SDK · hardware · TU1 / up to 3 B-frames request · {} · {}s keyframes · NV12 readback", if ui.get_constant_bitrate() { "CBR" } else { "VBR" }, ui.get_keyframe_seconds()) }
-        else if codec == Codec::Av1 { "rav1e 0.8.1 · Rust · speed 8 · P-only · 8-frame lookahead · CPU NV12 input".into() }
+        else if codec == Codec::Av1 { format!("rav1e 0.8.1 · Rust · speed {} · P-only · 8-frame lookahead · CPU NV12 input", ui.get_software_speed()) }
         else { "Windows Media Foundation · H.264 · driver / Windows rate control".into() }.into());
     ui.set_encoder_label(encoder.into());
     ui.set_codec_label(codec.name().into());
     let (width, height) = state
         .source
         .as_ref()
-        .map(|s| (s.width, s.height))
+        .map(|s| fastrecorder_core::output_size(s.width, s.height, ui.get_output_height() as u32))
         .unwrap_or((1920, 1080));
     let recommended = recommended_bitrate_mbps(codec, width, height, ui.get_fps() as u32);
     let bitrate = match ui.get_bitrate_mode() {
@@ -260,4 +264,57 @@ pub(super) fn install(ui: &MainWindow, state: &Shared) -> std::io::Result<()> {
             });
         })?;
     Ok(())
+}
+
+/// The NVENC settings that will be requested, in OBS-like terms, for Info.
+fn nvenc_summary(ui: &MainWindow) -> String {
+    let low_latency = ui.get_low_latency();
+    let rate = if ui.get_quality_mode() {
+        format!("CQP {} · single pass", ui.get_quality_level())
+    } else {
+        let multipass = [
+            "single pass",
+            "two-pass quarter resolution",
+            "two-pass full resolution",
+        ][ui.get_multipass().clamp(0, 2) as usize];
+        let peak = if ui.get_constant_bitrate() || ui.get_max_bitrate() == 0 {
+            String::new()
+        } else {
+            format!(" · peak {} Mbps", ui.get_max_bitrate())
+        };
+        format!(
+            "{}{peak} · {multipass}",
+            if ui.get_constant_bitrate() {
+                "CBR"
+            } else {
+                "VBR"
+            }
+        )
+    };
+    let b_frames = match (low_latency, ui.get_b_frames()) {
+        (true, _) => "no B-frames".to_string(),
+        (false, b) if b < 0 => "up to 2 B-frames".to_string(),
+        (false, b) => format!("up to {b} B-frames"),
+    };
+    let aq = match (ui.get_spatial_aq(), ui.get_temporal_aq()) {
+        (true, true) => "spatial + temporal AQ",
+        (true, false) => "spatial AQ",
+        (false, true) => "temporal AQ",
+        (false, false) => "AQ off",
+    };
+    format!(
+        "NVENC API 12.1 ABI · P{} · {} tuning · {aq} · {rate} · {b_frames} · {} · {}s keyframes · driver may reduce optional features",
+        ui.get_nvenc_preset(),
+        if low_latency {
+            "low-latency"
+        } else {
+            "high-quality"
+        },
+        if ui.get_lookahead() && !low_latency {
+            "8–16-frame lookahead"
+        } else {
+            "no lookahead"
+        },
+        ui.get_keyframe_seconds()
+    )
 }

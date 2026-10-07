@@ -15,14 +15,17 @@ pub(super) fn register_shortcuts(
     let weak = ui.as_weak();
     native::RecordingShortcut::register(start, stop, move |action| {
         let _ = weak.upgrade_in_event_loop(move |ui| {
-            let can_stop = matches!(ui.get_session_state(), 1 | 2);
+            // Counting down counts as "starting": Stop cancels it, Start is ignored.
+            let can_stop = matches!(ui.get_session_state(), 1 | 2) || ui.get_counting_down();
             let apply = match action {
-                native::ShortcutAction::Start => ui.get_can_start_recording(),
+                native::ShortcutAction::Start => {
+                    ui.get_can_start_recording() && !ui.get_counting_down()
+                }
                 native::ShortcutAction::Stop => can_stop,
                 native::ShortcutAction::Toggle => can_stop || ui.get_can_start_recording(),
             };
             if apply {
-                ui.invoke_toggle_recording();
+                ui.invoke_record_pressed();
             }
         });
     })

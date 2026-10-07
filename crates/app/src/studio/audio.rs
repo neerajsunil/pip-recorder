@@ -109,6 +109,7 @@ pub(super) fn audio_config(ui: &MainWindow, state: &AppState) -> fastrecorder_co
         microphone_device: state.microphone_device.clone(),
         desktop_volume: ui.get_desktop_volume() as u32,
         microphone_volume: ui.get_microphone_volume() as u32,
+        bitrate_kbps: ui.get_audio_bitrate() as u32,
     }
 }
 

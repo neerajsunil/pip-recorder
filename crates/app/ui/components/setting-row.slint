@@ -1,0 +1,30 @@
+import { Theme } from "../theme.slint";
+
+// A setting: plain-language title and help on the left, its control on the right.
+export component SettingRow inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> description;
+    in property <length> control-width: 280px;
+    spacing: 24px; vertical-stretch: 0;
+    VerticalLayout { alignment: center; spacing: 3px; horizontal-stretch: 1;
+        Text { text: root.title; color: Theme.ink; font-size: 13px; font-weight: 600; wrap: word-wrap; }
+        if root.description != "": Text { text: root.description; color: Theme.ink-soft; font-size: 12px; wrap: word-wrap; }
+    }
+    VerticalLayout { alignment: center; width: root.control-width; horizontal-stretch: 0;
+        @children
+    }
+}
+
+// A titled group of settings; `advanced` adds a small badge so experts can spot extras.
+export component SettingGroup inherits VerticalLayout {
+    in property <string> title;
+    in property <bool> advanced: false;
+    spacing: 18px; alignment: start; vertical-stretch: 0;
+    HorizontalLayout { spacing: 8px; alignment: start; height: 22px;
+        Text { text: root.title; color: Theme.ink; font-size: 15px; font-weight: 700; vertical-alignment: center; }
+        if root.advanced: Rectangle { width: badge.preferred-width + 16px; height: 20px; y: 1px; border-radius: 10px; background: Theme.lilac-soft;
+            badge := Text { text: "Advanced"; color: Theme.accent-ink; font-size: 11px; font-weight: 600; }
+        }
+    }
+    @children
+}

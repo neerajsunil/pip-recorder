@@ -1,0 +1,59 @@
+import { Theme } from "../theme.slint";
+
+// One option of a Segmented control.
+component Segment inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> has-icon;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    callback clicked();
+    forward-focus: focus;
+    accessible-role: tab; accessible-label: text; accessible-item-selected: selected; accessible-enabled: enabled;
+    accessible-action-default => { root.clicked(); }
+    border-radius: self.height / 2;
+    background: selected ? Theme.surface : touch.has-hover && enabled ? Theme.hover : transparent;
+    border-width: focus.has-focus ? 2px : 0px; border-color: Theme.lilac;
+    drop-shadow-blur: selected ? 4px : 0px; drop-shadow-color: Theme.shadow; drop-shadow-offset-y: 1px;
+    animate background { duration: 110ms; }
+    min-width: label.preferred-width + (root.has-icon ? 24px : 0px) + 24px;
+    HorizontalLayout { alignment: center; spacing: 8px; padding-left: 12px; padding-right: 12px;
+        if root.has-icon: Image { source: root.icon; width: 16px; height: 16px; y: (parent.height - self.height) / 2; colorize: root.selected ? Theme.accent-ink : Theme.ink-soft; }
+        label := Text { text: root.text; color: root.selected ? Theme.ink : Theme.ink-soft; font-size: 13px; font-weight: root.selected ? 600 : 500; vertical-alignment: center; }
+    }
+    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; } return reject; } }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+
+// A pill of mutually exclusive options; `current` is -1 when none applies.
+export component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current;
+    in property <bool> enabled: true;
+    callback selected(int);
+    height: 36px; border-radius: self.height / 2; background: Theme.sunken;
+    opacity: enabled ? 1 : 0.55;
+    accessible-role: tab-list;
+    HorizontalLayout { padding: 3px; spacing: 2px;
+        for option[index] in root.options: Segment {
+            text: option; selected: index == root.current; enabled: root.enabled;
+            clicked => { if root.current != index { root.current = index; root.selected(index); } }
+        }
+    }
+}
+
+// Same control with an icon per option.
+export struct IconOption { text: string, icon: image }
+export component IconSegmented inherits Rectangle {
+    in property <[IconOption]> options;
+    in-out property <int> current;
+    callback selected(int);
+    height: 40px; border-radius: self.height / 2; background: Theme.sunken;
+    accessible-role: tab-list;
+    HorizontalLayout { padding: 4px; spacing: 4px;
+        for option[index] in root.options: Segment {
+            text: option.text; icon: option.icon; has-icon: true; selected: index == root.current;
+            clicked => { if root.current != index { root.current = index; root.selected(index); } }
+        }
+    }
+}

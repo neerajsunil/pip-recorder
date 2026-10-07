@@ -1,10 +1,15 @@
-// Live peak meter; turns amber near clipping and red at clipping or on device errors.
+import { Theme } from "../theme.slint";
+
+// Live peak meter; turns butter near clipping and coral at clipping or on device errors.
 export component AudioMeter inherits Rectangle {
     in property <float> level;
     in property <bool> enabled: true;
     in property <bool> failed: false;
-    width: 72px; height: 5px; border-radius: 2px; background: #363c49;
+    width: 72px; height: 6px; border-radius: self.height / 2; background: Theme.sunken;
     accessible-role: progress-indicator;
     accessible-label: failed ? "Audio device unavailable" : "Audio level";
-    Rectangle { width: parent.width * min(1, max(0, root.level)); height: parent.height; border-radius: 2px; background: root.failed || root.level >= 0.99 ? #ed7888 : root.level > 0.85 ? #e8bc70 : #81c3aa; opacity: root.enabled ? 1 : 0; }
+    Rectangle { x: 0; width: max(root.height, parent.width * min(1, max(0, root.level))); height: parent.height; border-radius: root.height / 2;
+        background: root.failed || root.level >= 0.99 ? Theme.coral : root.level > 0.85 ? Theme.butter : Theme.mint;
+        opacity: root.enabled && (root.level > 0.005 || root.failed) ? 1 : 0;
+    }
 }

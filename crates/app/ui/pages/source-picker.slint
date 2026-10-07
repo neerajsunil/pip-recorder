@@ -1,7 +1,9 @@
 import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { ActionButton } from "../components/action-button.slint";
 import { FieldLabel } from "../components/labels.slint";
 import { SourceRow } from "../components/source-row.slint";
+import { IconSegmented } from "../components/segmented.slint";
 
 export struct SourceEntry { name: string, detail: string, index: int }
 
@@ -14,16 +16,24 @@ export component SourcePicker inherits VerticalLayout {
     callback refresh-sources();
     callback select-source(int);
     spacing: 14px;
-    HorizontalLayout { height: 36px; spacing: 8px;
-        ActionButton { width: 124px; text: "Displays"; icon: @image-url("../icons/monitor.svg"); primary: root.display-tab; clicked => { root.display-tab = true; root.refresh-sources(); } }
-        ActionButton { width: 124px; text: "Applications"; icon: @image-url("../icons/app-window.svg"); primary: !root.display-tab; clicked => { root.display-tab = false; root.refresh-sources(); } }
+    HorizontalLayout { height: 40px; spacing: 8px;
+        IconSegmented { width: 300px;
+            options: [{ text: "Displays", icon: @image-url("../icons/monitor.svg") }, { text: "Applications", icon: @image-url("../icons/app-window.svg") }];
+            current: root.display-tab ? 0 : 1;
+            selected(index) => { root.display-tab = index == 0; root.refresh-sources(); }
+        }
         Rectangle { horizontal-stretch: 1; }
-        ActionButton { width: 36px; icon: @image-url("../icons/refresh-cw.svg"); label: "Refresh sources"; clicked => { root.refresh-sources(); } }
+        ActionButton { width: 40px; height: 40px; pill: true; icon: @image-url("../icons/refresh-cw.svg"); label: "Refresh sources"; clicked => { root.refresh-sources(); } }
     }
     ScrollView { vertical-stretch: 1; content-width: self.visible-width;
         VerticalLayout { spacing: 8px; padding: 2px;
-            if root.sources.length == 0: FieldLabel { text: "No available sources. Open an application, then refresh."; }
-            for source in root.sources: SourceRow { name: source.name; detail: source.detail; selected: root.selected-source == source.index; enabled: !root.busy; clicked => { root.select-source(source.index); } }
+            if root.sources.length == 0: FieldLabel { text: "Nothing to record here yet. Open an application, then refresh."; }
+            for source in root.sources: SourceRow {
+                name: source.name; detail: source.detail; enabled: !root.busy;
+                icon: root.display-tab ? @image-url("../icons/monitor.svg") : @image-url("../icons/app-window.svg");
+                selected: root.selected-source == source.index;
+                clicked => { root.select-source(source.index); }
+            }
             Rectangle { min-height: 1px; vertical-stretch: 1; }
         }
     }

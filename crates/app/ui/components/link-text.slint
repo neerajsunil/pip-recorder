@@ -1,0 +1,18 @@
+import { Theme } from "../theme.slint";
+
+// A small inline text button used in the save-location line.
+export component LinkText inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+    forward-focus: focus;
+    accessible-role: button; accessible-label: text; accessible-enabled: enabled;
+    accessible-action-default => { root.clicked(); }
+    width: label.preferred-width + 12px; border-radius: 6px;
+    background: touch.has-hover && enabled ? Theme.hover : transparent;
+    border-width: focus.has-focus ? 2px : 0px; border-color: Theme.lilac;
+    opacity: enabled ? 1 : 0.5;
+    label := Text { text: root.text; color: Theme.accent-ink; font-size: 12px; font-weight: 600; }
+    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; } return reject; } }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
