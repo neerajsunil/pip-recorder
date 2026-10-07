@@ -1,0 +1,26 @@
+import { CheckBox } from "std-widgets.slint";
+import { ActionButton } from "../components/action-button.slint";
+import { Divider, FieldLabel, InfoLine, SectionTitle } from "../components/labels.slint";
+
+// Settings → General: cursor capture, studio behaviour and save location.
+export component GeneralPage inherits VerticalLayout {
+    in property <bool> busy;
+    in property <string> destination-label;
+    in property <string> app-version;
+    in-out property <bool> capture-cursor;
+    in-out property <bool> auto-minimize;
+    callback settings-changed();
+    callback choose-destination();
+    alignment: start; spacing: 16px;
+    SectionTitle { text: "Capture"; }
+    CheckBox { text: "Include mouse cursor"; checked <=> root.capture-cursor; enabled: !root.busy; toggled => { root.settings-changed(); } }
+    Divider { }
+    SectionTitle { text: "Studio"; }
+    CheckBox { text: "Minimize when recording starts"; checked <=> root.auto-minimize; enabled: !root.busy; toggled => { root.settings-changed(); } }
+    Divider { }
+    SectionTitle { text: "Saving"; }
+    InfoLine { label: "Next recording"; value: root.destination-label; path: true; }
+    ActionButton { height: 36px; width: 150px; text: "Change location"; icon: @image-url("../icons/folder.svg"); enabled: !root.busy; clicked => { root.choose-destination(); } }
+    Divider { }
+    FieldLabel { text: "FastRecorder " + root.app-version; }
+}

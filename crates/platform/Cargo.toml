@@ -1,0 +1,15 @@
+[package]
+name = "fastrecorder-platform"
+description = "Selects FastRecorder's native recording backend for the target operating system"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+diagnostics = ["fastrecorder-windows/diagnostics"]
+
+[target.'cfg(target_os = "windows")'.dependencies]
+fastrecorder-windows.workspace = true
+# Future backends slot in the same way, e.g.
+# [target.'cfg(target_os = "macos")'.dependencies]
+# fastrecorder-macos.workspace = true

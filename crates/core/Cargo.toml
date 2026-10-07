@@ -1,5 +1,6 @@
 [package]
 name = "fastrecorder-core"
+description = "Platform-neutral recording domain for FastRecorder: configuration, session state, codecs and timing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

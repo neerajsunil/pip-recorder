@@ -29,11 +29,11 @@ try {
     New-Item -ItemType Directory -Path $vendored -Force | Out-Null
     foreach ($item in @(
         @('crates/app/ui/icons/LICENSE','lucide-LICENSE'),
-        @('crates/windows/src/nvenc_api/LICENSE','nvenc-adaptation-LICENSE'),
-        @('crates/windows/src/nvenc_api/NVIDIA-LICENSE','NVIDIA-LICENSE'),
-        @('crates/windows/src/nvenc_api/README.md','nvenc-provenance.md'),
-        @('crates/windows/vendor/INTEL-LICENSE','INTEL-LICENSE'),
-        @('crates/windows/vendor/README.md','intel-provenance.md')
+        @('crates/platform-windows/src/encode/nvenc/api/LICENSE','nvenc-adaptation-LICENSE'),
+        @('crates/platform-windows/src/encode/nvenc/api/NVIDIA-LICENSE','NVIDIA-LICENSE'),
+        @('crates/platform-windows/src/encode/nvenc/api/README.md','nvenc-provenance.md'),
+        @('crates/platform-windows/vendor/INTEL-LICENSE','INTEL-LICENSE'),
+        @('crates/platform-windows/vendor/README.md','intel-provenance.md')
     )) { Copy-Item -LiteralPath (Join-Path $projectRoot $item[0]) -Destination (Join-Path $vendored $item[1]) }
     $metadata = & $cargoPath metadata --format-version 1 --locked --filter-platform x86_64-pc-windows-msvc
     if ($LASTEXITCODE -ne 0) { throw 'Could not read locked dependency metadata.' }

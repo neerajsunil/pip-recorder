@@ -1,0 +1,70 @@
+import { ComboBox, SpinBox } from "std-widgets.slint";
+import { Divider, FieldLabel, Hint, SectionTitle } from "../components/labels.slint";
+
+// Settings → Video: GPU, encoder, frame rate, bitrate and encoder-specific controls.
+export component VideoPage inherits VerticalLayout {
+    in property <bool> busy;
+    in property <bool> hardware-ready;
+    in property <[string]> gpu-names;
+    in property <[string]> encoder-names;
+    in property <string> bitrate-detail;
+    in property <bool> nvenc-controls;
+    in property <bool> keyframe-controls;
+    in-out property <int> gpu-choice;
+    in-out property <int> encoder-list-index;
+    in-out property <int> fps;
+    in-out property <int> bitrate-mode;
+    in-out property <int> custom-bitrate;
+    in-out property <int> nvenc-preset;
+    in-out property <bool> quality-mode;
+    in-out property <bool> constant-bitrate;
+    in-out property <int> quality-level;
+    in-out property <int> keyframe-seconds;
+    callback settings-changed();
+    callback encoder-selected(int);
+    alignment: start; spacing: 16px;
+    SectionTitle { text: "Encoding"; }
+    VerticalLayout { spacing: 7px;
+        FieldLabel { text: "GPU"; }
+        ComboBox { model: root.gpu-names; current-index <=> root.gpu-choice; enabled: !root.busy && root.hardware-ready; selected => { root.settings-changed(); } }
+    }
+    VerticalLayout { spacing: 7px;
+        FieldLabel { text: "Encoder / codec"; }
+        ComboBox { model: root.encoder-names; current-index <=> root.encoder-list-index; enabled: !root.busy && root.hardware-ready; selected => { root.encoder-selected(self.current-index); } }
+    }
+    Divider { }
+    SectionTitle { text: "Quality"; }
+    HorizontalLayout { spacing: 16px;
+        VerticalLayout { spacing: 7px;
+            FieldLabel { text: "Frame rate"; }
+            ComboBox { model: ["30 fps", "60 fps"]; current-index: root.fps == 60 ? 1 : 0; enabled: !root.busy; selected => { root.fps = self.current-index == 1 ? 60 : 30; root.settings-changed(); } }
+        }
+        VerticalLayout { spacing: 7px;
+            FieldLabel { text: "Bitrate"; }
+            ComboBox { model: ["High", "Recommended", "Low", "Custom"]; current-index <=> root.bitrate-mode; enabled: !root.busy && !(root.quality-mode && root.nvenc-controls); selected => { root.settings-changed(); } }
+        }
+    }
+    if root.bitrate-mode == 3 && !(root.quality-mode && root.nvenc-controls): VerticalLayout { spacing: 7px;
+        FieldLabel { text: "Custom bitrate (Mbps)"; }
+        SpinBox { value <=> root.custom-bitrate; minimum: 1; maximum: 100; enabled: !root.busy; edited => { root.settings-changed(); } }
+    }
+    Hint { text: root.bitrate-detail; }
+    if root.nvenc-controls: VerticalLayout { spacing: 16px;
+        VerticalLayout { spacing: 7px;
+            FieldLabel { text: "NVENC preset"; }
+            ComboBox { model: ["P1 · Fastest", "P2 · Faster", "P3 · Fast", "P4 · Balanced", "P5 · Quality", "P6 · Higher quality", "P7 · Highest quality"]; current-index: root.nvenc-preset - 1; enabled: !root.busy; selected => { root.nvenc-preset = self.current-index + 1; root.settings-changed(); } }
+        }
+        VerticalLayout { spacing: 7px;
+            FieldLabel { text: "Rate control"; }
+            ComboBox { model: ["VBR · bitrate", "CQP · quality", "CBR · fixed bitrate"]; current-index: root.quality-mode ? 1 : root.constant-bitrate ? 2 : 0; enabled: !root.busy; selected => { root.quality-mode = self.current-index == 1; root.constant-bitrate = self.current-index == 2; root.settings-changed(); } }
+        }
+        if root.quality-mode: VerticalLayout { spacing: 7px;
+            FieldLabel { text: "Quality level · lower is better, larger files"; }
+            SpinBox { value <=> root.quality-level; minimum: 1; maximum: 51; enabled: !root.busy; edited => { root.settings-changed(); } }
+        }
+    }
+    if root.keyframe-controls: VerticalLayout { spacing: 7px;
+        FieldLabel { text: "Keyframe interval (seconds)"; }
+        SpinBox { value <=> root.keyframe-seconds; minimum: 1; maximum: 10; enabled: !root.busy; edited => { root.settings-changed(); } }
+    }
+}

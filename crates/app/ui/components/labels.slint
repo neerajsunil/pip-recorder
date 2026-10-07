@@ -1,0 +1,14 @@
+// Text styles shared across the studio and settings.
+export component FieldLabel inherits Text { color: #a2a8b9; font-size: 12px; }
+export component SectionTitle inherits Text { color: #e9ecf4; font-size: 15px; font-weight: 600; }
+export component Divider inherits Rectangle { height: 1px; background: #373d49; }
+export component Hint inherits Text { color: #a2a8b9; wrap: word-wrap; font-size: 12px; }
+export component Warning inherits Text { color: #f0b980; wrap: word-wrap; font-size: 12px; }
+export component InfoLine inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> path: false;
+    vertical-stretch: 0; alignment: start; spacing: 5px;
+    FieldLabel { text: root.label; height: 16px; }
+    Text { text: root.value; color: #e2e5ee; font-size: 13px; wrap: root.path ? char-wrap : word-wrap; }
+}

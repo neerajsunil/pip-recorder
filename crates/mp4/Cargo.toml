@@ -1,0 +1,9 @@
+[package]
+name = "fastrecorder-mp4"
+description = "Portable MP4 (ISO BMFF) writer for FastRecorder: AV1/HEVC/H.264 video with an AAC-LC track"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fastrecorder-core.workspace = true

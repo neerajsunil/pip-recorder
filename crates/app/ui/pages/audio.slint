@@ -1,0 +1,74 @@
+import { CheckBox, ComboBox, SpinBox } from "std-widgets.slint";
+import { ActionButton } from "../components/action-button.slint";
+import { AudioMeter } from "../components/audio-meter.slint";
+import { Divider, FieldLabel, Hint, SectionTitle, Warning } from "../components/labels.slint";
+
+// One audio source: enable toggle, live meter, device and volume.
+component AudioSource inherits VerticalLayout {
+    in property <string> toggle-label;
+    in property <string> device-label;
+    in property <bool> busy;
+    in property <bool> audio-ready;
+    in property <float> level;
+    in property <string> error;
+    in property <[string]> devices;
+    in-out property <bool> checked;
+    in-out property <int> device;
+    in-out property <int> volume;
+    callback settings-changed();
+    alignment: start; spacing: 16px;
+    CheckBox { text: root.toggle-label; checked <=> root.checked; enabled: !root.busy; toggled => { root.settings-changed(); } }
+    AudioMeter { width: 200px; level: root.level; enabled: root.checked; failed: root.error != ""; }
+    if root.checked && root.error != "": Warning { text: root.error; }
+    VerticalLayout { spacing: 7px;
+        FieldLabel { text: root.device-label; }
+        ComboBox { model: root.devices; current-index <=> root.device; enabled: !root.busy && root.audio-ready; selected => { root.settings-changed(); } }
+    }
+    VerticalLayout { spacing: 7px;
+        FieldLabel { text: "Recording volume (%)"; }
+        SpinBox { value <=> root.volume; minimum: 0; maximum: 200; enabled: !root.busy; edited => { root.settings-changed(); } }
+    }
+}
+
+// Settings → Audio: desktop (loopback) and microphone sources.
+export component AudioPage inherits VerticalLayout {
+    in property <bool> busy;
+    in property <bool> audio-ready;
+    in property <string> audio-status;
+    in property <[string]> desktop-audio-devices;
+    in property <[string]> microphone-audio-devices;
+    in property <float> desktop-level;
+    in property <float> microphone-level;
+    in property <string> desktop-audio-error;
+    in property <string> microphone-audio-error;
+    in-out property <bool> desktop-audio;
+    in-out property <bool> microphone-audio;
+    in-out property <int> desktop-audio-device;
+    in-out property <int> microphone-audio-device;
+    in-out property <int> desktop-volume;
+    in-out property <int> microphone-volume;
+    callback settings-changed();
+    callback refresh-audio-devices();
+    alignment: start; spacing: 16px;
+    HorizontalLayout { height: 32px;
+        SectionTitle { text: "Desktop audio"; vertical-alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+        ActionButton { width: 32px; height: 32px; icon: @image-url("../icons/refresh-cw.svg"); label: "Refresh audio devices"; enabled: !root.busy; clicked => { root.refresh-audio-devices(); } }
+    }
+    AudioSource {
+        toggle-label: "Record desktop audio"; device-label: "Playback device";
+        busy: root.busy; audio-ready: root.audio-ready; level: root.desktop-level; error: root.desktop-audio-error; devices: root.desktop-audio-devices;
+        checked <=> root.desktop-audio; device <=> root.desktop-audio-device; volume <=> root.desktop-volume;
+        settings-changed => { root.settings-changed(); }
+    }
+    Divider { }
+    SectionTitle { text: "Microphone"; }
+    AudioSource {
+        toggle-label: "Record microphone"; device-label: "Input device";
+        busy: root.busy; audio-ready: root.audio-ready; level: root.microphone-level; error: root.microphone-audio-error; devices: root.microphone-audio-devices;
+        checked <=> root.microphone-audio; device <=> root.microphone-audio-device; volume <=> root.microphone-volume;
+        settings-changed => { root.settings-changed(); }
+    }
+    if root.audio-status != "": Warning { text: root.audio-status; }
+    Hint { text: "Enabled sources are mixed into one stereo audio track."; }
+}

@@ -1253,7 +1253,7 @@ name = "fastrecorder"
 version = "0.1.0-alpha.1"
 dependencies = [
  "fastrecorder-core",
- "fastrecorder-windows",
+ "fastrecorder-platform",
  "image",
  "raw-window-handle",
  "serde",
@@ -1269,11 +1269,26 @@ name = "fastrecorder-core"
 version = "0.1.0-alpha.1"
 
 [[package]]
+name = "fastrecorder-mp4"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "fastrecorder-core",
+]
+
+[[package]]
+name = "fastrecorder-platform"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "fastrecorder-windows",
+]
+
+[[package]]
 name = "fastrecorder-windows"
 version = "0.1.0-alpha.1"
 dependencies = [
  "cc",
  "fastrecorder-core",
+ "fastrecorder-mp4",
  "libloading",
  "rav1e",
  "windows",
