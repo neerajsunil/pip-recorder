@@ -1,8 +1,8 @@
 [package]
 name = "fastrecorder"
 description = "A simple, native screen recorder for Windows with AV1, HEVC, H.264 and desktop/microphone audio"
-repository = "https://github.com/neerajsunil/FastRecorder"
-homepage = "https://github.com/neerajsunil/FastRecorder"
+repository = "https://github.com/neerajsunil/pip-recorder"
+homepage = "https://github.com/neerajsunil/pip-recorder"
 readme = "../../README.md"
 keywords = ["screen-recorder", "windows", "av1", "slint", "rust"]
 categories = ["multimedia::video", "gui"]

@@ -22,13 +22,18 @@ pub struct GpuInfo {
 }
 
 pub fn create_device(index: Option<u32>) -> Result<(ID3D11Device, ID3D11DeviceContext)> {
-    unsafe {
-        let adapter = if let Some(index) = index {
+    let adapter = match index {
+        Some(index) => unsafe {
             let factory: IDXGIFactory1 = CreateDXGIFactory1()?;
             Some(factory.EnumAdapters1(index)?.cast::<IDXGIAdapter>()?)
-        } else {
-            None
-        };
+        },
+        None => None,
+    };
+    device_on(adapter)
+}
+
+fn device_on(adapter: Option<IDXGIAdapter>) -> Result<(ID3D11Device, ID3D11DeviceContext)> {
+    unsafe {
         let mut device = None;
         let mut context = None;
         D3D11CreateDevice(

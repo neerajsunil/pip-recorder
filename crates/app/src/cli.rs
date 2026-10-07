@@ -1,5 +1,5 @@
-//! Command-line flags. Release builds accept only `--software-ui`; the rest
-//! are development switches used by `--features diagnostics` and docs tooling.
+//! Command-line flags: development switches used by `--features diagnostics`
+//! and docs tooling. `--software-ui` is still accepted and has no effect.
 
 /// Whether `name` was passed on the command line.
 pub fn flag(name: &str) -> bool {

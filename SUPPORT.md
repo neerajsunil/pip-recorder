@@ -1,8 +1,8 @@
 # Getting help
 
-- Usage questions: [GitHub Discussions](https://github.com/neerajsunil/FastRecorder/discussions).
-- Reproducible defects: [bug report](https://github.com/neerajsunil/FastRecorder/issues/new?template=bug_report.yml).
-- Ideas and planned platform requests: [feature request](https://github.com/neerajsunil/FastRecorder/issues/new?template=feature_request.yml).
+- Usage questions: [GitHub Discussions](https://github.com/neerajsunil/pip-recorder/discussions).
+- Reproducible defects: [bug report](https://github.com/neerajsunil/pip-recorder/issues/new?template=bug_report.yml).
+- Ideas and planned platform requests: [feature request](https://github.com/neerajsunil/pip-recorder/issues/new?template=feature_request.yml).
 - Vulnerabilities: [SECURITY.md](SECURITY.md).
 
 Include the FastRecorder version (Settings → General), OS/build, CPU architecture, GPU/driver and selected codec. Explain what you clicked and what happened. Error details are available through the studio's Details button; technical settings are under Settings → Info. Fatal diagnostics are in `%LOCALAPPDATA%\FastRecorder\diagnostics.log`. Review screenshots, paths and logs before sharing them.

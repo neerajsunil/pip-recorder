@@ -26,7 +26,8 @@ impl SoftwareAv1 {
         height: u32,
         recording: &RecordingConfig,
     ) -> Result<Self, String> {
-        let mut encoder = EncoderConfig::with_speed_preset(8);
+        let mut encoder =
+            EncoderConfig::with_speed_preset(recording.tuning.software_speed.min(10) as u8);
         encoder.width = width as usize;
         encoder.height = height as usize;
         encoder.time_base = Rational {
@@ -35,7 +36,7 @@ impl SoftwareAv1 {
         };
         encoder.bitrate = (recording.bitrate_for(Codec::Av1, width, height) * 1_000_000) as i32;
         // Keep CPU cost bounded for real-time software capture. Hardware encoders
-        // use reordered frames; rav1e retains speed 8 and eight-frame RDO analysis.
+        // use reordered frames; rav1e keeps eight-frame RDO analysis at every speed.
         encoder.low_latency = true;
         encoder.max_key_frame_interval = u64::from(recording.fps * recording.keyframe_seconds);
         encoder.speed_settings.rdo_lookahead_frames = 8;

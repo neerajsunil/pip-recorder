@@ -28,6 +28,25 @@ pub struct Preferences {
     microphone_volume: i32,
     start_shortcut: String,
     stop_shortcut: String,
+    fps: i32,
+    max_height: i32,
+    audio_bitrate: i32,
+    countdown_seconds: i32,
+    auto_stop_minutes: i32,
+    after_save: i32,
+    theme_mode: i32,
+    show_advanced: bool,
+    prefer_h264: bool,
+    b_frames: i32,
+    lookahead: bool,
+    spatial_aq: bool,
+    temporal_aq: bool,
+    multipass: i32,
+    low_latency: bool,
+    max_bitrate: i32,
+    software_speed: i32,
+    file_name_pattern: String,
+    process_priority: i32,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -54,6 +73,25 @@ impl Default for Preferences {
             microphone_volume: 100,
             start_shortcut: "Ctrl+Shift+F9".into(),
             stop_shortcut: "Ctrl+Shift+F10".into(),
+            fps: 30,
+            max_height: 0,
+            audio_bitrate: 192,
+            countdown_seconds: 3,
+            auto_stop_minutes: 0,
+            after_save: 0,
+            theme_mode: 0,
+            show_advanced: false,
+            prefer_h264: false,
+            b_frames: -1,
+            lookahead: false,
+            spatial_aq: true,
+            temporal_aq: false,
+            multipass: 1,
+            low_latency: false,
+            max_bitrate: 0,
+            software_speed: 8,
+            file_name_pattern: fastrecorder_core::DEFAULT_FILE_NAME.into(),
+            process_priority: 0,
         }
     }
 }
@@ -74,7 +112,46 @@ impl Preferences {
         }
     }
     pub fn apply(&self, ui: &MainWindow) {
-        // Frame rate intentionally starts at 30 fps on every launch.
+        let pick = |value: i32, allowed: &[u32], fallback: i32| {
+            u32::try_from(value)
+                .ok()
+                .filter(|value| allowed.contains(value))
+                .map_or(fallback, |value| value as i32)
+        };
+        ui.set_fps(pick(self.fps, &fastrecorder_core::FRAME_RATES, 30));
+        ui.set_output_height(pick(self.max_height, &fastrecorder_core::OUTPUT_HEIGHTS, 0));
+        ui.set_audio_bitrate(pick(
+            self.audio_bitrate,
+            &fastrecorder_core::AUDIO_BITRATES_KBPS,
+            192,
+        ));
+        ui.set_countdown_seconds(pick(self.countdown_seconds, &[0, 3, 5, 10], 0));
+        ui.set_auto_stop_minutes(pick(
+            self.auto_stop_minutes,
+            &[0, 5, 10, 15, 30, 60, 120],
+            0,
+        ));
+        ui.set_after_save(self.after_save.clamp(0, 2));
+        ui.set_theme_mode(self.theme_mode.clamp(0, 2));
+        ui.set_show_advanced(self.show_advanced);
+        ui.set_prefer_h264(self.prefer_h264);
+        ui.set_b_frames(self.b_frames.clamp(-1, 4));
+        ui.set_lookahead(self.lookahead);
+        ui.set_spatial_aq(self.spatial_aq);
+        ui.set_temporal_aq(self.temporal_aq);
+        ui.set_multipass(self.multipass.clamp(0, 2));
+        ui.set_low_latency(self.low_latency);
+        ui.set_max_bitrate(self.max_bitrate.clamp(0, 200));
+        ui.set_software_speed(self.software_speed.clamp(0, 10));
+        ui.set_file_name_pattern(
+            if self.file_name_pattern.trim().is_empty() {
+                fastrecorder_core::DEFAULT_FILE_NAME
+            } else {
+                self.file_name_pattern.as_str()
+            }
+            .into(),
+        );
+        ui.set_process_priority(self.process_priority.clamp(0, 2));
         ui.set_bitrate_mode(self.bitrate_mode.clamp(0, 3));
         ui.set_custom_bitrate(self.custom_bitrate.clamp(1, 100));
         ui.set_nvenc_preset(self.nvenc_preset.clamp(1, 7));
@@ -123,6 +200,25 @@ impl Preferences {
             microphone_volume: ui.get_microphone_volume(),
             start_shortcut: ui.get_active_start_shortcut().to_string(),
             stop_shortcut: ui.get_active_stop_shortcut().to_string(),
+            fps: ui.get_fps(),
+            max_height: ui.get_output_height(),
+            audio_bitrate: ui.get_audio_bitrate(),
+            countdown_seconds: ui.get_countdown_seconds(),
+            auto_stop_minutes: ui.get_auto_stop_minutes(),
+            after_save: ui.get_after_save(),
+            theme_mode: ui.get_theme_mode(),
+            show_advanced: ui.get_show_advanced(),
+            prefer_h264: ui.get_prefer_h264(),
+            b_frames: ui.get_b_frames(),
+            lookahead: ui.get_lookahead(),
+            spatial_aq: ui.get_spatial_aq(),
+            temporal_aq: ui.get_temporal_aq(),
+            multipass: ui.get_multipass(),
+            low_latency: ui.get_low_latency(),
+            max_bitrate: ui.get_max_bitrate(),
+            software_speed: ui.get_software_speed(),
+            file_name_pattern: ui.get_file_name_pattern().to_string(),
+            process_priority: ui.get_process_priority(),
             ..Self::default()
         }
     }

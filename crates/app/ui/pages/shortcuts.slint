@@ -1,6 +1,7 @@
 import { LineEdit } from "std-widgets.slint";
 import { ActionButton } from "../components/action-button.slint";
-import { FieldLabel, Hint, SectionTitle } from "../components/labels.slint";
+import { Hint } from "../components/labels.slint";
+import { SettingGroup, SettingRow } from "../components/setting-row.slint";
 
 // Settings → Shortcuts: global start/stop bindings.
 export component ShortcutsPage inherits VerticalLayout {
@@ -9,21 +10,19 @@ export component ShortcutsPage inherits VerticalLayout {
     in-out property <string> start-shortcut;
     in-out property <string> stop-shortcut;
     callback apply-shortcuts();
-    alignment: start; spacing: 16px;
-    SectionTitle { text: "Recording actions"; }
-    VerticalLayout { spacing: 7px;
-        FieldLabel { text: "Start recording"; }
-        LineEdit { text <=> root.start-shortcut; placeholder-text: "Ctrl+Shift+F9"; enabled: !root.busy; }
+    alignment: start; spacing: 22px;
+    SettingGroup { title: "Keyboard shortcuts";
+        SettingRow { title: "Start recording"; description: "Works even when Pip is minimized.";
+            LineEdit { text <=> root.start-shortcut; placeholder-text: "Ctrl+Shift+F9"; enabled: !root.busy; }
+        }
+        SettingRow { title: "Stop recording"; description: "Use the same keys as Start to make one toggle.";
+            LineEdit { text <=> root.stop-shortcut; placeholder-text: "Ctrl+Shift+F10"; enabled: !root.busy; }
+        }
+        Hint { text: "Use Ctrl, Alt, Shift or Win with a key, or an F-key alone. Leave a box empty to turn that shortcut off."; }
+        HorizontalLayout { spacing: 10px; height: 36px; alignment: start;
+            ActionButton { width: 112px; pill: true; text: "Apply"; has-icon: false; primary: true; enabled: !root.busy; clicked => { root.apply-shortcuts(); } }
+            ActionButton { width: 132px; pill: true; text: "Reset defaults"; has-icon: false; enabled: !root.busy; clicked => { root.start-shortcut = "Ctrl+Shift+F9"; root.stop-shortcut = "Ctrl+Shift+F10"; root.apply-shortcuts(); } }
+        }
+        Hint { text: root.shortcut-status; }
     }
-    VerticalLayout { spacing: 7px;
-        FieldLabel { text: "Stop recording"; }
-        LineEdit { text <=> root.stop-shortcut; placeholder-text: "Ctrl+Shift+F10"; enabled: !root.busy; }
-    }
-    Hint { text: "Use Ctrl, Alt, Shift or Win with a key, or an F-key alone. Assign the same shortcut to both actions to toggle recording. Leave a field blank to disable it."; }
-    HorizontalLayout { spacing: 10px; height: 36px;
-        ActionButton { width: 112px; text: "Apply"; has-icon: false; primary: true; enabled: !root.busy; clicked => { root.apply-shortcuts(); } }
-        ActionButton { width: 132px; text: "Reset defaults"; has-icon: false; enabled: !root.busy; clicked => { root.start-shortcut = "Ctrl+Shift+F9"; root.stop-shortcut = "Ctrl+Shift+F10"; root.apply-shortcuts(); } }
-        Rectangle { horizontal-stretch: 1; }
-    }
-    Hint { text: root.shortcut-status; }
 }

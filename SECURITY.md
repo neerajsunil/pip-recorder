@@ -8,7 +8,7 @@ During the preview phase, fixes target the latest preview and the main branch. O
 
 ## Report a vulnerability privately
 
-Use [GitHub private vulnerability reporting](https://github.com/neerajsunil/FastRecorder/security/advisories/new). Include the affected version, Windows build, relevant GPU/driver, reproduction steps and expected impact. Do not post credentials, private recordings or sensitive desktop screenshots. If the private form is unavailable, open an issue asking the maintainer for a private contact without disclosing exploit details.
+Use [GitHub private vulnerability reporting](https://github.com/neerajsunil/pip-recorder/security/advisories/new). Include the affected version, Windows build, relevant GPU/driver, reproduction steps and expected impact. Do not post credentials, private recordings or sensitive desktop screenshots. If the private form is unavailable, open an issue asking the maintainer for a private contact without disclosing exploit details.
 
 Please avoid a public exploit report until the maintainer has had a reasonable opportunity to investigate and coordinate a fix. Response and patch timelines depend on maintainer availability; no guaranteed response SLA is offered.
 

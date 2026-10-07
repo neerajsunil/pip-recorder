@@ -18,6 +18,8 @@ pub struct AacTrack {
     pub sizes: Vec<u32>,
     pub frames: u64,
     pub priming: u64,
+    /// Average bitrate in bits per second, recorded in the decoder configuration.
+    pub bitrate: u32,
 }
 impl Drop for AacTrack {
     fn drop(&mut self) {
@@ -67,7 +69,7 @@ pub(crate) fn audio_trak(
         4,
         &[
             vec![0x40, 0x15, 0, 0, 0],
-            words(&[192_000, 192_000]),
+            words(&[audio.bitrate, audio.bitrate]),
             descriptor(5, &AAC_AUDIO_SPECIFIC_CONFIG),
         ]
         .concat(),

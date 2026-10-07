@@ -1,0 +1,66 @@
+// Pip's identity: name, links, a light pastel and a midnight palette, and shape scale.
+// Every colour in the UI comes from `Theme`; change it here, not in components.
+
+export global Brand {
+    out property <string> name: "Pip";
+    out property <string> tagline: "screen recorder";
+    out property <string> repository: "https://github.com/neerajsunil/pip-recorder";
+}
+
+export global Theme {
+    // Set by the studio: follows Windows unless the user picks Light or Dark.
+    in-out property <bool> dark: false;
+
+    // Surfaces: warm cream (light) or neutral midnight greys (dark).
+    out property <color> canvas: dark ? #111214 : #fbf7f2;
+    out property <color> surface: dark ? #1a1b1f : #ffffff;
+    out property <color> sunken: dark ? #222328 : #f5efe8;
+    out property <color> hover: dark ? #2a2c32 : #f1eae2;
+    out property <color> line: dark ? #2a2c31 : #ece4db;
+    out property <color> line-strong: dark ? #3b3e46 : #ddd2c6;
+    out property <color> scrim: dark ? #000000a0 : #2b223850;
+    out property <color> preview-well: dark ? #0c0d0f : #f0ebf7;
+    out property <color> chip: dark ? #1a1b1fe6 : #ffffffe6;
+    out property <color> shadow: dark ? #00000059 : #5a46a00f;
+
+    // Ink. `ink-faint` is for decoration and disabled text only.
+    out property <color> ink: dark ? #ececef : #2b2238;
+    out property <color> ink-soft: dark ? #a4a7b0 : #685d75;
+    out property <color> ink-faint: dark ? #6d717b : #a49bb0;
+    out property <color> on-accent: #ffffff;
+
+    // Accent: Pip, focus, selection, primary actions. Lilac in light mode,
+    // moonlight blue in dark mode. `accent-ink` is accent text or icons on a
+    // surface; `lilac-deep` is a fill under white text.
+    out property <color> lilac: dark ? #7e9fd8 : #8b7cf6;
+    out property <color> lilac-deep: dark ? #3d61a6 : #6656e0;
+    out property <color> lilac-deeper: dark ? #34558f : #5747cf;
+    out property <color> lilac-soft: dark ? #1b2333 : #efecff;
+    out property <color> lilac-line: dark ? #34496e : #cfc7ff;
+    out property <color> accent-ink: dark ? #a9c3ee : #5747cf;
+
+    // Coral: recording.
+    out property <color> coral: #d63a50;
+    out property <color> coral-deep: #c22f45;
+    out property <color> coral-soft: dark ? #2e1a1f : #ffe9ec;
+    out property <color> coral-line: dark ? #5c2c37 : #f6c2ca;
+    out property <color> coral-ink: dark ? #ff9aa8 : #c22f45;
+    out property <color> coral-bright: #ff6b7d;
+
+    // Status.
+    out property <color> mint: #5cc39c;
+    out property <color> mint-soft: dark ? #162a24 : #e3f5ed;
+    out property <color> mint-ink: dark ? #84dcb8 : #2f8a69;
+    out property <color> butter: #f2b347;
+    out property <color> butter-soft: dark ? #2e2719 : #fff4dc;
+    out property <color> warn-ink: dark ? #f4c879 : #8f5a0c;
+    out property <color> danger-ink: dark ? #ff93a3 : #b8314a;
+    out property <color> blush: #ffb8c8;
+    // Pip's face never changes with the theme.
+    out property <color> pip-ink: #2b2238;
+
+    // Shape.
+    out property <length> radius-s: 10px;
+    out property <length> radius-m: 14px;
+    out property <length> radius-l: 20px;
+}

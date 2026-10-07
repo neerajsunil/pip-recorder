@@ -101,6 +101,7 @@ pub(super) fn install(ui: &MainWindow, state: &Shared, tray: &TrayHandle) -> Rc<
         let config = RecordingConfig {
             destination,
             fps: ui.get_fps() as u32,
+            max_height: ui.get_output_height() as u32,
             bitrate_mbps: ui.get_bitrate_mbps() as u32,
             bitrate_mode: ui.get_bitrate_mode() as u32,
             gpu_index: selected_gpu(&ui, &state),
@@ -110,6 +111,21 @@ pub(super) fn install(ui: &MainWindow, state: &Shared, tray: &TrayHandle) -> Rc<
             capture_cursor: ui.get_capture_cursor(),
             quality_qp: (ui.get_quality_mode() && ui.get_nvenc_controls())
                 .then_some(ui.get_quality_level() as u32),
+            prefer_h264: ui.get_prefer_h264(),
+            tuning: fastrecorder_core::EncoderTuning {
+                b_frames: u32::try_from(ui.get_b_frames()).ok(),
+                lookahead: ui.get_lookahead(),
+                spatial_aq: ui.get_spatial_aq(),
+                temporal_aq: ui.get_temporal_aq(),
+                multipass: match ui.get_multipass() {
+                    0 => fastrecorder_core::Multipass::Off,
+                    2 => fastrecorder_core::Multipass::FullResolution,
+                    _ => fastrecorder_core::Multipass::QuarterResolution,
+                },
+                low_latency: ui.get_low_latency(),
+                max_bitrate_mbps: ui.get_max_bitrate().max(0) as u32,
+                software_speed: ui.get_software_speed().clamp(0, 10) as u32,
+            },
             audio: {
                 let diagnostic = cfg!(feature = "diagnostics")
                     && cli::flag("--self-test-record")
@@ -161,7 +177,8 @@ pub(super) fn install(ui: &MainWindow, state: &Shared, tray: &TrayHandle) -> Rc<
         }
         ui.set_session_state(1);
         ui.set_elapsed("00:00".into());
-        ui.set_window_title("FastRecorder · Starting recording".into());
+        ui.set_window_title("Pip · Starting recording".into());
+        ui.set_celebrate(false);
         notify(&ui, "", false);
         let event_weak = ui.as_weak();
         let preview_channel = state.preview_channel.clone();
@@ -203,7 +220,7 @@ pub(super) fn install(ui: &MainWindow, state: &Shared, tray: &TrayHandle) -> Rc<
                     tray.update(SessionState::Idle, "");
                 }
                 ui.set_session_state(0);
-                ui.set_window_title("FastRecorder".into());
+                ui.set_window_title("Pip".into());
                 if let Some(source) = state.source.clone() {
                     state.preview =
                         native::Preview::start(source, state.preview_channel.clone()).ok();
@@ -231,7 +248,7 @@ pub(super) fn install(ui: &MainWindow, state: &Shared, tray: &TrayHandle) -> Rc<
                 ui.set_elapsed(elapsed.clone());
                 ui.set_window_title(
                     format!(
-                        "FastRecorder · {} {elapsed}",
+                        "Pip · {} {elapsed}",
                         if state.session.state() == SessionState::Stopping {
                             "Saving"
                         } else {
@@ -242,6 +259,19 @@ pub(super) fn install(ui: &MainWindow, state: &Shared, tray: &TrayHandle) -> Rc<
                 );
                 if let Some(tray) = clock_tray.borrow().as_ref() {
                     tray.update(state.session.state(), elapsed.as_str());
+                }
+                let limit = u64::try_from(ui.get_auto_stop_minutes()).unwrap_or(0) * 60;
+                if limit > 0 && seconds >= limit && state.session.state() == SessionState::Recording
+                {
+                    // Stop outside this callback: toggling takes the state lock.
+                    let weak = ui.as_weak();
+                    Timer::single_shot(Duration::ZERO, move || {
+                        if let Some(ui) = weak.upgrade()
+                            && ui.get_session_state() == 2
+                        {
+                            ui.invoke_toggle_recording();
+                        }
+                    });
                 }
             }
         });
@@ -316,7 +346,7 @@ fn handle_event(ui: &MainWindow, tray: &TrayHandle, event_state: &Shared, event:
             state.recording.take();
             state.started = None;
             ui.set_session_state(0);
-            ui.set_window_title("FastRecorder".into());
+            ui.set_window_title("Pip".into());
             if let Some(tray) = tray.borrow().as_ref() {
                 tray.update(SessionState::Idle, "");
             }
@@ -362,7 +392,18 @@ fn handle_event(ui: &MainWindow, tray: &TrayHandle, event_state: &Shared, event:
                 if let Some(error) = &error {
                     notify_issue(ui, "Recording saved with an issue.", error.as_str());
                 } else {
-                    notify(ui, "Recording saved.", false);
+                    notify(ui, "Saved! Nice recording.", false);
+                    ui.set_celebrate(true);
+                    if !state.close_after_save {
+                        let after = match ui.get_after_save() {
+                            1 => native::reveal_recording(&file),
+                            2 => native::open_recording(&file),
+                            _ => Ok(()),
+                        };
+                        if let Err(error) = after {
+                            notify_issue(ui, "Saved, but couldn't open it.", error);
+                        }
+                    }
                 }
                 #[cfg(feature = "diagnostics")]
                 println!("SAVED {}", file.display());

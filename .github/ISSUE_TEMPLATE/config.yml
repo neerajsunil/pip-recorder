@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Questions and usage help
-    url: https://github.com/neerajsunil/FastRecorder/discussions
+    url: https://github.com/neerajsunil/pip-recorder/discussions
     about: Ask how to use FastRecorder
   - name: Report a security problem privately
-    url: https://github.com/neerajsunil/FastRecorder/security/advisories/new
+    url: https://github.com/neerajsunil/pip-recorder/security/advisories/new
     about: Do not disclose vulnerabilities in a public issue

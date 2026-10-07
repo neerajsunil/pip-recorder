@@ -1,7 +1,11 @@
+//! Live preview. With a preview surface (the normal case) the capture GPU scales
+//! each frame straight into the studio's preview window; otherwise a small image
+//! is read back for the UI to draw.
 use crate::{
     Source,
-    capture::{Capture, CapturedFrame},
+    capture::{Capture, CapturedFrame, DisplayColor},
     gpu::{create_device, texture},
+    preview_surface::{self, Presenter, Target},
 };
 use std::{
     mem::ManuallyDrop,
@@ -30,12 +34,17 @@ use windows::{
     core::{IInspectable, Interface, Result},
 };
 
+/// Preview news for the UI. With a preview surface only state changes are sent
+/// (`presented`); the CPU fallback carries pixels.
 pub struct PreviewFrame {
     pub width: u32,
     pub height: u32,
     pub source_width: u32,
     pub source_height: u32,
+    /// CPU pixels; empty when the frame went to the preview surface.
     pub rgba: Vec<u8>,
+    /// The preview surface is showing live frames.
+    pub presented: bool,
 }
 #[derive(Clone)]
 pub struct PreviewChannel {
@@ -85,7 +94,7 @@ impl Preview {
                     }
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         run(source, &channel, &worker_stop)
-                    })).unwrap_or_else(|_| Err("Preview stopped after an internal error. Choose a source again or restart FastRecorder.".into()));
+                    })).unwrap_or_else(|_| Err("Preview stopped after an internal error. Choose a source again or restart Pip.".into()));
                     unsafe {
                         RoUninitialize();
                     }
@@ -117,6 +126,16 @@ impl Drop for Preview {
     }
 }
 
+/// SDR displays are captured as 8-bit BGRA (half the memory of FP16 and no
+/// conversion pass); HDR displays need FP16 for tone mapping.
+pub(crate) fn capture_format(color: DisplayColor) -> DirectXPixelFormat {
+    if color.hdr {
+        DirectXPixelFormat::R16G16B16A16Float
+    } else {
+        DirectXPixelFormat::B8G8R8A8UIntNormalized
+    }
+}
+
 fn run(
     source: Source,
     channel: &PreviewChannel,
@@ -127,9 +146,11 @@ fn run(
     let winrt: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
         .and_then(|v| v.cast())
         .map_err(|e| e.to_string())?;
+    let mut color = DisplayColor::for_source(&source);
+    let mut format = capture_format(color);
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
         &winrt,
-        DirectXPixelFormat::R16G16B16A16Float,
+        format,
         2,
         source.item.Size().map_err(|e| e.to_string())?,
     )
@@ -185,10 +206,15 @@ fn run(
         .map_err(|e| e.to_string())?;
     crate::capture::configure_capture_session(&capture.session)
         .map_err(|e| format!("Could not configure borderless preview: {e}"))?;
+    // Ask Windows (11 24H2+) not to deliver preview frames faster than we show them.
+    let _ = capture
+        .session
+        .SetMinUpdateInterval(windows::Foundation::TimeSpan {
+            Duration: SURFACE_INTERVAL.as_nanos() as i64 / 100,
+        });
     capture.session.StartCapture().map_err(|e| e.to_string())?;
     let mut renderer = PreviewRenderer::default();
     let mut converter = None;
-    let mut color = crate::capture::DisplayColor::for_source(&source);
     let mut color_check = Instant::now();
     let mut size = source.item.Size().map_err(|e| e.to_string())?;
     let mut due = Instant::now();
@@ -213,7 +239,7 @@ fn run(
         if !seen_frame && Instant::now() > frame_deadline {
             return Err("No preview frames arrived. Refresh or choose another source.".into());
         }
-        if Instant::now() < due || !channel.enabled.load(Ordering::Acquire) {
+        if Instant::now() < due {
             continue;
         }
         let frame = latest
@@ -225,11 +251,16 @@ fn run(
             if content.Width <= 0 || content.Height <= 0 {
                 continue;
             }
-            if content != size {
+            if color_check.elapsed() >= Duration::from_secs(2) {
+                color = DisplayColor::for_source(&source);
+                color_check = Instant::now();
+            }
+            if content != size || capture_format(color) != format {
                 drop(frame);
+                format = capture_format(color);
                 capture
                     .pool
-                    .Recreate(&winrt, DirectXPixelFormat::R16G16B16A16Float, 2, content)
+                    .Recreate(&winrt, format, 2, content)
                     .map_err(|e| e.to_string())?;
                 size = content;
                 converter = None;
@@ -248,38 +279,43 @@ fn run(
             if desc.Width < content.Width as u32 || desc.Height < content.Height as u32 {
                 continue;
             }
-            if color_check.elapsed() >= Duration::from_secs(2) {
-                color = crate::capture::DisplayColor::for_source(&source);
-                color_check = Instant::now();
-            }
-            if converter.is_none() {
-                converter = Some(
-                    crate::capture::ColorConverter::new(
-                        &device,
-                        &context,
-                        content.Width as u32,
-                        content.Height as u32,
-                    )
-                    .map_err(|e| format!("Preview color conversion failed: {e}"))?,
-                );
-            }
-            let converter = converter.as_ref().unwrap();
-            if !converter
-                .copy(&input, color)
-                .map_err(|e| format!("Preview color conversion failed: {e}"))?
-            {
-                continue;
-            }
+            // SDR frames are already 8-bit BGRA: the video processor reads the
+            // capture texture itself. HDR frames are tone-mapped first.
+            let source_texture = if desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT {
+                if converter.is_none() {
+                    converter = Some(
+                        crate::capture::ColorConverter::new(
+                            &device,
+                            &context,
+                            content.Width as u32,
+                            content.Height as u32,
+                        )
+                        .map_err(|e| format!("Preview color conversion failed: {e}"))?,
+                    );
+                }
+                let converter = converter.as_ref().unwrap();
+                if !converter
+                    .copy(&input, color)
+                    .map_err(|e| format!("Preview color conversion failed: {e}"))?
+                {
+                    continue;
+                }
+                converter.output.clone()
+            } else {
+                input.clone()
+            };
             renderer.update(
                 &device,
                 &context,
-                &converter.output,
+                &source_texture,
                 content.Width as u32,
                 content.Height as u32,
                 channel,
             );
+            // Submit the read before the frame returns to the capture pool.
+            unsafe { context.Flush() };
             seen_frame = true;
-            due = Instant::now() + Duration::from_millis(83);
+            due = Instant::now() + renderer.interval();
         }
     }
     if closed.load(Ordering::Acquire) {
@@ -288,12 +324,33 @@ fn run(
     Ok(())
 }
 
+/// CPU fallback: a small image read back to memory at about 12 fps.
+const CPU_INTERVAL: Duration = Duration::from_millis(83);
+const CPU_MAX: (u32, u32) = (960, 540);
+/// Preview surface: 30 fps. Each frame still processes the full-resolution
+/// capture, so a higher rate mostly costs GPU bandwidth and battery.
+const SURFACE_INTERVAL: Duration = Duration::from_micros(33_333);
+
 #[derive(Default)]
 pub(crate) struct PreviewRenderer {
     renderer: Option<Renderer>,
     last: Option<Instant>,
+    /// Creating the swap chain failed (for example another device still owns
+    /// the window); retry after this time and use the CPU path meanwhile.
+    surface_retry: Option<Instant>,
 }
 impl PreviewRenderer {
+    pub fn interval(&self) -> Duration {
+        if self
+            .renderer
+            .as_ref()
+            .is_some_and(|r| r.presenter.is_some())
+        {
+            SURFACE_INTERVAL
+        } else {
+            CPU_INTERVAL
+        }
+    }
     pub fn update(
         &mut self,
         device: &ID3D11Device,
@@ -306,49 +363,101 @@ impl PreviewRenderer {
         if !channel.enabled.load(Ordering::Acquire)
             || self
                 .last
-                .is_some_and(|time| time.elapsed() < Duration::from_millis(83))
+                .is_some_and(|time| time.elapsed() < self.interval())
         {
             return;
         }
         self.last = Some(Instant::now());
-        let frame = (|| -> Result<PreviewFrame> {
-            if self
-                .renderer
-                .as_ref()
-                .is_none_or(|r| r.iw != width || r.ih != height)
-            {
-                self.renderer = Some(Renderer::new(device, context, width, height)?);
+        let target = preview_surface::target().filter(|_| {
+            self.surface_retry
+                .is_none_or(|retry| Instant::now() >= retry)
+        });
+        let size = match target {
+            Some(target) => (target.width, target.height),
+            None => fit(width, height, CPU_MAX),
+        };
+        let rebuild = self.renderer.as_ref().is_none_or(|r| {
+            r.iw != width
+                || r.ih != height
+                || (r.width, r.height) != size
+                || r.presenter.as_ref().map(|p| p.target) != target
+        });
+        let frame = (|| -> Result<Option<PreviewFrame>> {
+            if rebuild {
+                // Release the old swap chain before another can bind the window.
+                self.renderer = None;
+                self.renderer = Some(
+                    match Renderer::new(device, context, width, height, size, target) {
+                        Ok(renderer) => renderer,
+                        Err(_) if target.is_some() => {
+                            self.surface_retry = Some(Instant::now() + Duration::from_secs(1));
+                            let size = fit(width, height, CPU_MAX);
+                            Renderer::new(device, context, width, height, size, None)?
+                        }
+                        Err(error) => return Err(error),
+                    },
+                );
             }
-            self.renderer.as_ref().unwrap().read(input)
-        })()
-        .map_err(|e| format!("Preview unavailable: {e}"));
-        channel.publish(frame);
+            let renderer = self.renderer.as_mut().unwrap();
+            let frame = renderer.read(input)?;
+            // The surface needs no per-frame message; announce only a fresh start.
+            Ok((rebuild || !frame.presented).then_some(frame))
+        })();
+        match frame {
+            Ok(Some(frame)) => channel.publish(Ok(frame)),
+            Ok(None) => {}
+            Err(error) => channel.publish(Err(format!("Preview unavailable: {error}"))),
+        }
     }
 }
+
+/// Fits a source into `bounds` keeping its aspect ratio, never enlarging it.
+fn fit(width: u32, height: u32, bounds: (u32, u32)) -> (u32, u32) {
+    let scale = (f64::from(bounds.0) / f64::from(width))
+        .min(f64::from(bounds.1) / f64::from(height))
+        .min(1.0);
+    (
+        (f64::from(width) * scale).round().max(1.0) as u32,
+        (f64::from(height) * scale).round().max(1.0) as u32,
+    )
+}
+
 struct Renderer {
     context: ID3D11DeviceContext,
     video_context: ID3D11VideoContext,
     processor: ID3D11VideoProcessor,
-    input: ID3D11Texture2D,
-    input_view: ID3D11VideoProcessorInputView,
-    output: ID3D11Texture2D,
-    output_view: ID3D11VideoProcessorOutputView,
-    staging: ID3D11Texture2D,
+    video_device: ID3D11VideoDevice,
+    enumerator: ID3D11VideoProcessorEnumerator,
+    /// Input views by texture: the capture pool's few textures, or the HDR
+    /// converter's output. Reading them directly avoids a full-size copy.
+    input_views: Vec<(usize, ID3D11VideoProcessorInputView)>,
+    /// CPU path: output texture, its view, and a staging copy for readback.
+    output: Option<(
+        ID3D11Texture2D,
+        ID3D11VideoProcessorOutputView,
+        ID3D11Texture2D,
+    )>,
+    /// Surface path: the swap chain of the studio's preview window.
+    presenter: Option<Presenter>,
     iw: u32,
     ih: u32,
     width: u32,
     height: u32,
 }
 impl Renderer {
-    fn new(device: &ID3D11Device, context: &ID3D11DeviceContext, iw: u32, ih: u32) -> Result<Self> {
-        let scale = (960.0 / iw as f64).min(540.0 / ih as f64).min(1.0);
-        let width = (iw as f64 * scale).round().max(1.0) as u32;
-        let height = (ih as f64 * scale).round().max(1.0) as u32;
+    fn new(
+        device: &ID3D11Device,
+        context: &ID3D11DeviceContext,
+        iw: u32,
+        ih: u32,
+        (width, height): (u32, u32),
+        target: Option<Target>,
+    ) -> Result<Self> {
         unsafe {
             let video_device: ID3D11VideoDevice = device.cast()?;
             let video_context: ID3D11VideoContext = context.cast()?;
             let rate = DXGI_RATIONAL {
-                Numerator: 12,
+                Numerator: if target.is_some() { 30 } else { 12 },
                 Denominator: 1,
             };
             let desc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
@@ -363,53 +472,43 @@ impl Renderer {
             };
             let enumerator = video_device.CreateVideoProcessorEnumerator(&desc)?;
             let processor = video_device.CreateVideoProcessor(&enumerator, 0)?;
-            let input = texture(
-                device,
-                iw,
-                ih,
-                DXGI_FORMAT_B8G8R8A8_UNORM,
-                D3D11_USAGE_DEFAULT,
-                D3D11_BIND_RENDER_TARGET.0 as u32,
-                0,
-            )?;
-            let output = texture(
-                device,
-                width,
-                height,
-                DXGI_FORMAT_B8G8R8A8_UNORM,
-                D3D11_USAGE_DEFAULT,
-                D3D11_BIND_RENDER_TARGET.0 as u32,
-                0,
-            )?;
-            let staging = texture(
-                device,
-                width,
-                height,
-                DXGI_FORMAT_B8G8R8A8_UNORM,
-                D3D11_USAGE_STAGING,
-                0,
-                D3D11_CPU_ACCESS_READ.0 as u32,
-            )?;
-            let mut input_view = None;
-            let mut output_view = None;
-            video_device.CreateVideoProcessorInputView(
-                &input,
-                &enumerator,
-                &D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
-                    ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
-                    ..Default::default()
-                },
-                Some(&mut input_view),
-            )?;
-            video_device.CreateVideoProcessorOutputView(
-                &output,
-                &enumerator,
-                &D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
-                    ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
-                    ..Default::default()
-                },
-                Some(&mut output_view),
-            )?;
+            let (output, presenter) = match target {
+                Some(target) => (
+                    None,
+                    Some(Presenter::new(device, &video_device, &enumerator, target)?),
+                ),
+                None => {
+                    let output = texture(
+                        device,
+                        width,
+                        height,
+                        DXGI_FORMAT_B8G8R8A8_UNORM,
+                        D3D11_USAGE_DEFAULT,
+                        D3D11_BIND_RENDER_TARGET.0 as u32,
+                        0,
+                    )?;
+                    let staging = texture(
+                        device,
+                        width,
+                        height,
+                        DXGI_FORMAT_B8G8R8A8_UNORM,
+                        D3D11_USAGE_STAGING,
+                        0,
+                        D3D11_CPU_ACCESS_READ.0 as u32,
+                    )?;
+                    let mut output_view = None;
+                    video_device.CreateVideoProcessorOutputView(
+                        &output,
+                        &enumerator,
+                        &D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
+                            ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
+                            ..Default::default()
+                        },
+                        Some(&mut output_view),
+                    )?;
+                    (Some((output, output_view.unwrap(), staging)), None)
+                }
+            };
             video_context.VideoProcessorSetStreamAutoProcessingMode(&processor, 0, false);
             let source = RECT {
                 left: 0,
@@ -417,7 +516,17 @@ impl Renderer {
                 right: iw as i32,
                 bottom: ih as i32,
             };
+            // Letterbox inside the surface; the CPU image is already fitted.
+            let (dw, dh) = fit(iw, ih, (width, height));
+            let left = (width - dw) as i32 / 2;
+            let top = (height - dh) as i32 / 2;
             let destination = RECT {
+                left,
+                top,
+                right: left + dw as i32,
+                bottom: top + dh as i32,
+            };
+            let full = RECT {
                 left: 0,
                 top: 0,
                 right: width as i32,
@@ -425,7 +534,24 @@ impl Renderer {
             };
             video_context.VideoProcessorSetStreamSourceRect(&processor, 0, true, Some(&source));
             video_context.VideoProcessorSetStreamDestRect(&processor, 0, true, Some(&destination));
-            video_context.VideoProcessorSetOutputTargetRect(&processor, true, Some(&destination));
+            video_context.VideoProcessorSetOutputTargetRect(&processor, true, Some(&full));
+            if let Some(target) = target {
+                let [r, g, b] = target.background;
+                video_context.VideoProcessorSetOutputBackgroundColor(
+                    &processor,
+                    false,
+                    &D3D11_VIDEO_COLOR {
+                        Anonymous: D3D11_VIDEO_COLOR_0 {
+                            RGBA: D3D11_VIDEO_COLOR_RGBA {
+                                R: r,
+                                G: g,
+                                B: b,
+                                A: 1.0,
+                            },
+                        },
+                    },
+                );
+            }
             video_context.VideoProcessorSetStreamColorSpace(
                 &processor,
                 0,
@@ -439,11 +565,11 @@ impl Renderer {
                 context: context.clone(),
                 video_context,
                 processor,
-                input,
-                input_view: input_view.unwrap(),
+                video_device,
+                enumerator,
+                input_views: Vec::new(),
                 output,
-                output_view: output_view.unwrap(),
-                staging,
+                presenter,
                 iw,
                 ih,
                 width,
@@ -451,35 +577,72 @@ impl Renderer {
             })
         }
     }
-    fn read(&self, texture: &ID3D11Texture2D) -> Result<PreviewFrame> {
+    fn input_view(&mut self, texture: &ID3D11Texture2D) -> Result<ID3D11VideoProcessorInputView> {
+        let key = texture.as_raw() as usize;
+        if let Some((_, view)) = self.input_views.iter().find(|(k, _)| *k == key) {
+            return Ok(view.clone());
+        }
+        let mut view = None;
         unsafe {
-            let region = D3D11_BOX {
-                left: 0,
-                top: 0,
-                front: 0,
-                right: self.iw,
-                bottom: self.ih,
-                back: 1,
-            };
-            self.context
-                .CopySubresourceRegion(&self.input, 0, 0, 0, 0, texture, 0, Some(&region));
+            self.video_device.CreateVideoProcessorInputView(
+                texture,
+                &self.enumerator,
+                &D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
+                    ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
+                    ..Default::default()
+                },
+                Some(&mut view),
+            )?;
+        }
+        let view = view.unwrap();
+        if self.input_views.len() >= 4 {
+            self.input_views.remove(0);
+        }
+        self.input_views.push((key, view.clone()));
+        Ok(view)
+    }
+    fn blit(
+        &self,
+        input: &ID3D11VideoProcessorInputView,
+        output_view: &ID3D11VideoProcessorOutputView,
+    ) -> Result<()> {
+        unsafe {
             let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
                 Enable: true.into(),
-                pInputSurface: ManuallyDrop::new(Some(self.input_view.clone())),
+                pInputSurface: ManuallyDrop::new(Some(input.clone())),
                 ..Default::default()
             };
             let result = self.video_context.VideoProcessorBlt(
                 &self.processor,
-                &self.output_view,
+                output_view,
                 0,
                 std::slice::from_ref(&stream),
             );
             ManuallyDrop::drop(&mut stream.pInputSurface);
-            result?;
-            self.context.CopyResource(&self.staging, &self.output);
+            result
+        }
+    }
+    fn read(&mut self, texture: &ID3D11Texture2D) -> Result<PreviewFrame> {
+        let input = self.input_view(texture)?;
+        if let Some(presenter) = &self.presenter {
+            self.blit(&input, &presenter.view)?;
+            presenter.present()?;
+            return Ok(PreviewFrame {
+                width: self.width,
+                height: self.height,
+                source_width: self.iw,
+                source_height: self.ih,
+                rgba: Vec::new(),
+                presented: true,
+            });
+        }
+        let (output, output_view, staging) = self.output.as_ref().unwrap();
+        self.blit(&input, output_view)?;
+        unsafe {
+            self.context.CopyResource(staging, output);
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             self.context
-                .Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+                .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
             let mut rgba = vec![0; self.width as usize * self.height as usize * 4];
             for y in 0..self.height as usize {
                 let row = std::slice::from_raw_parts(
@@ -495,13 +658,14 @@ impl Renderer {
                     output.copy_from_slice(&[input[2], input[1], input[0], 255]);
                 }
             }
-            self.context.Unmap(&self.staging, 0);
+            self.context.Unmap(staging, 0);
             Ok(PreviewFrame {
                 width: self.width,
                 height: self.height,
                 source_width: self.iw,
                 source_height: self.ih,
                 rgba,
+                presented: false,
             })
         }
     }

@@ -1,0 +1,29 @@
+import { Theme } from "../theme.slint";
+
+// A community link: tinted icon, title and one line of description.
+export component LinkCard inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    in property <image> icon;
+    in property <color> tint: Theme.accent-ink;
+    in property <color> wash: Theme.lilac-soft;
+    callback clicked();
+    forward-focus: focus;
+    accessible-role: button; accessible-label: title; accessible-description: detail;
+    height: 84px; border-radius: Theme.radius-m;
+    background: touch.has-hover ? Theme.hover : Theme.surface;
+    border-width: focus.has-focus ? 2px : 1px; border-color: focus.has-focus ? Theme.lilac : Theme.line;
+    animate background { duration: 110ms; }
+    HorizontalLayout { padding: 16px; spacing: 14px;
+        Rectangle { width: 40px; height: 40px; border-radius: 12px; background: root.wash; y: (parent.height - self.height) / 2;
+            Image { source: root.icon; width: 20px; height: 20px; colorize: root.tint; }
+        }
+        VerticalLayout { alignment: center; spacing: 4px;
+            Text { text: root.title; color: Theme.ink; font-size: 14px; font-weight: 600; overflow: elide; }
+            Text { text: root.detail; color: Theme.ink-soft; font-size: 12px; wrap: word-wrap; }
+        }
+        Image { source: @image-url("../icons/arrow-up-right.svg"); width: 16px; height: 16px; y: (parent.height - self.height) / 2; colorize: touch.has-hover ? Theme.accent-ink : Theme.ink-faint; }
+    }
+    focus := FocusScope { key-pressed(event) => { if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; } return reject; } }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}

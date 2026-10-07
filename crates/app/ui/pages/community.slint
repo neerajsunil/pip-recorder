@@ -1,0 +1,44 @@
+import { Theme, Brand } from "../theme.slint";
+import { Pip, PipMood } from "../components/pip.slint";
+import { LinkCard } from "../components/link-card.slint";
+import { Hint } from "../components/labels.slint";
+
+// Community: where people meet, share and help build Pip. Links only; no network calls.
+export component CommunityPage inherits VerticalLayout {
+    callback open-link(string);
+    alignment: start; spacing: 18px;
+    Rectangle { height: 132px; border-radius: Theme.radius-l; background: Theme.lilac-soft;
+        HorizontalLayout { padding: 22px; spacing: 20px;
+            Pip { width: 88px; height: 88px; mood: PipMood.happy; }
+            VerticalLayout { alignment: center; spacing: 6px;
+                Text { text: Brand.name + " is made in the open, by people who record things."; color: Theme.ink; font-size: 18px; font-weight: 650; wrap: word-wrap; }
+                Text { text: "Free and open source, with no account and no tracking. Come say hi, show what you made, or help shape what comes next."; color: Theme.ink-soft; font-size: 13px; wrap: word-wrap; }
+            }
+        }
+    }
+    GridLayout { spacing: 12px;
+        Row {
+            LinkCard { title: "Say hi"; detail: "Ask questions and meet other " + Brand.name + " users in Discussions.";
+                icon: @image-url("../icons/message-circle.svg"); clicked => { root.open-link(Brand.repository + "/discussions"); } }
+            LinkCard { title: "Show what you made"; detail: "Share a tutorial, a demo or a clip you recorded.";
+                icon: @image-url("../icons/film.svg"); tint: Theme.coral-ink; wash: Theme.coral-soft;
+                clicked => { root.open-link(Brand.repository + "/discussions/categories/show-and-tell"); } }
+        }
+        Row {
+            LinkCard { title: "Suggest an idea"; detail: "Tell us what would make recording easier for you.";
+                icon: @image-url("../icons/lightbulb.svg"); tint: Theme.warn-ink; wash: Theme.butter-soft;
+                clicked => { root.open-link(Brand.repository + "/discussions/categories/ideas"); } }
+            LinkCard { title: "Report a bug"; detail: "Something off? A short report with the Diagnostics details helps a lot.";
+                icon: @image-url("../icons/circle-alert.svg"); tint: Theme.danger-ink; wash: Theme.coral-soft;
+                clicked => { root.open-link(Brand.repository + "/issues/new?template=bug_report.yml"); } }
+        }
+        Row {
+            LinkCard { title: "Help build " + Brand.name; detail: "Code, docs, translations and device testing are all welcome.";
+                icon: @image-url("../icons/code.svg"); tint: Theme.mint-ink; wash: Theme.mint-soft;
+                clicked => { root.open-link(Brand.repository + "/blob/main/CONTRIBUTING.md"); } }
+            LinkCard { title: "Star on GitHub"; detail: "A star helps other people find " + Brand.name + ".";
+                icon: @image-url("../icons/star.svg"); clicked => { root.open-link(Brand.repository); } }
+        }
+    }
+    Hint { text: "Thank you to everyone who has tested a preview, filed an issue or sent a pull request. " + Brand.name + " is free software under the GPL-3.0 license."; }
+}

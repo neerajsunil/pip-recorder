@@ -1,0 +1,64 @@
+import { Theme } from "../theme.slint";
+
+export enum PipMood { idle, recording, saving, happy, oops, sleepy }
+
+// Pip, the mascot: a little lilac camera whose eye is the record dot.
+// Drawn on a 128-unit grid (same geometry as icon.svg) so it scales cleanly.
+export component Pip inherits Rectangle {
+    in property <PipMood> mood: PipMood.idle;
+    private property <length> u: min(root.width, root.height) / 128;
+    private property <length> ox: (root.width - 128 * u) / 2;
+    private property <length> oy: (root.height - 128 * u) / 2;
+    private property <bool> blinking: false;
+    private property <bool> eye-open: mood != PipMood.happy && mood != PipMood.sleepy;
+    private property <length> eye-height: blinking ? 8 * u : 58 * u;
+    private property <length> pupil: mood == PipMood.oops ? 20 * u : 30 * u;
+    accessible-role: image;
+    accessible-label: "Pip";
+
+    Timer { interval: 4200ms; running: root.mood == PipMood.idle || root.mood == PipMood.oops; triggered => { root.blinking = true; reopen.running = true; } }
+    reopen := Timer { interval: 130ms; running: false; triggered => { root.blinking = false; self.running = false; } }
+
+    // Viewfinder bump, body, sheen and cheeks.
+    Rectangle { x: ox + 76 * u; y: oy + 6 * u; width: 28 * u; height: 20 * u; border-radius: 9 * u; background: Theme.lilac-deep; }
+    Rectangle { x: ox + 10 * u; y: oy + 16 * u; width: 108 * u; height: 104 * u; border-radius: 42 * u; background: Theme.lilac; }
+    Rectangle { x: ox + 26 * u; y: oy + 25 * u; width: 22 * u; height: 9 * u; border-radius: 4.5 * u; background: #ffffff; opacity: 0.28; }
+    Rectangle { x: ox + 17 * u; y: oy + 82 * u; width: 18 * u; height: 11 * u; border-radius: 5.5 * u; background: Theme.blush; opacity: root.mood == PipMood.oops ? 0.4 : 0.95; }
+    Rectangle { x: ox + 93 * u; y: oy + 82 * u; width: 18 * u; height: 11 * u; border-radius: 5.5 * u; background: Theme.blush; opacity: root.mood == PipMood.oops ? 0.4 : 0.95; }
+
+    // The eye: white lens, coral pupil (the record dot) and a sparkle.
+    if root.eye-open: Rectangle {
+        x: ox + 35 * u; y: oy + 62 * u - root.eye-height / 2; width: 58 * u; height: root.eye-height; border-radius: min(self.width, self.height) / 2; background: #ffffff; clip: true;
+        animate height, y { duration: 70ms; easing: ease-in-out; }
+        if root.mood == PipMood.recording: Rectangle {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: 42 * u; height: 42 * u; border-radius: 21 * u; background: Theme.coral-bright;
+            opacity: 0.2 + 0.2 * sin(animation-tick() / 1ms * 0.36deg);
+        }
+        Rectangle {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: root.pupil; height: min(root.pupil, parent.height); border-radius: self.width / 2;
+            background: root.mood == PipMood.saving ? Theme.lilac-deep : Theme.coral-bright;
+            animate width, background { duration: 160ms; }
+        }
+        Rectangle { x: parent.width / 2 + 5 * u; y: parent.height / 2 - 12 * u; width: 9 * u; height: 9 * u; border-radius: 4.5 * u; background: #ffffff; opacity: root.blinking ? 0 : 1; }
+    }
+    if root.mood == PipMood.happy: Path {
+        x: ox; y: oy; width: 128 * u; height: 128 * u; viewbox-width: 128; viewbox-height: 128;
+        commands: "M 42 68 Q 64 40 86 68"; stroke: #ffffff; stroke-width: 8 * u; stroke-line-cap: round; fill: transparent;
+    }
+    if root.mood == PipMood.sleepy: Path {
+        x: ox; y: oy; width: 128 * u; height: 128 * u; viewbox-width: 128; viewbox-height: 128;
+        commands: "M 42 60 Q 64 78 86 60"; stroke: #ffffff; stroke-width: 7 * u; stroke-line-cap: round; fill: transparent;
+    }
+
+    // Mouth.
+    Path {
+        x: ox; y: oy; width: 128 * u; height: 128 * u; viewbox-width: 128; viewbox-height: 128;
+        commands: root.mood == PipMood.happy ? "M 50 97 Q 64 112 78 97"
+            : root.mood == PipMood.oops ? "M 52 104 Q 58 98 64 104 Q 70 110 76 104"
+            : root.mood == PipMood.sleepy ? "M 58 102 Q 64 105 70 102"
+            : "M 54 99 Q 64 107 74 99";
+        stroke: Theme.pip-ink; stroke-width: 4.5 * u; stroke-line-cap: round; fill: transparent;
+    }
+}

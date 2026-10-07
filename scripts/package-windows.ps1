@@ -53,7 +53,7 @@ try {
     }
     $lines | Set-Content -LiteralPath (Join-Path $staging 'DEPENDENCY_LICENSES.md') -Encoding utf8
     $toolchain = & $cargoPath --version
-    @("FastRecorder $Version", "Target: x86_64-pc-windows-msvc", "Toolchain: $toolchain", "Source: https://github.com/neerajsunil/FastRecorder/tree/v$Version", 'Unsigned preview binary. See README and release readiness before relying on a recording.') |
+    @("FastRecorder $Version", "Target: x86_64-pc-windows-msvc", "Toolchain: $toolchain", "Source: https://github.com/neerajsunil/pip-recorder/tree/v$Version", 'Unsigned preview binary. See README and release readiness before relying on a recording.') |
         Set-Content -LiteralPath (Join-Path $staging 'BUILD_INFO.txt') -Encoding utf8
     $zip = Join-Path $distribution "$name.zip"
     Compress-Archive -LiteralPath $staging -DestinationPath $zip -CompressionLevel Optimal

@@ -1,4 +1,5 @@
 param(
+    [switch]$Fast,
     [switch]$Release,
     [switch]$SoftwareUI
 )
@@ -10,6 +11,7 @@ Push-Location $PSScriptRoot
 try {
     $cargoArgs = @('run', '-p', 'fastrecorder', '--locked')
     if ($Release) { $cargoArgs += '--release' }
+    elseif ($Fast) { $cargoArgs += @('--profile', 'fast') }
     if ($SoftwareUI) { $cargoArgs += @('--', '--software-ui') }
     & $cargoPath @cargoArgs
     if ($LASTEXITCODE -ne 0) { throw "FastRecorder exited with code $LASTEXITCODE" }

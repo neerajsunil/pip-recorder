@@ -21,8 +21,8 @@ export component InfoPage inherits VerticalLayout {
     InfoLine { label: "Verified encoder (last / current recording)"; value: root.active-encoder; }
     InfoLine { label: "Audio (last / current recording)"; value: root.audio-details; }
     InfoLine { label: "Recording statistics"; value: root.recording-stats; }
-    InfoLine { label: "Video pipeline"; value: "Windows Graphics Capture FP16 scRGB → GPU SDR normalization / HDR tone mapping → D3D11 video processor → NV12 / BT.709 SDR 8-bit → MP4"; }
-    InfoLine { label: "UI renderer / preview"; value: root.renderer-label + " · preview ≤ 960 × 540 at 12 fps, paused while minimized"; }
+    InfoLine { label: "Video pipeline"; value: "Windows Graphics Capture (8-bit BGRA on SDR displays, FP16 scRGB with GPU tone mapping on HDR) → D3D11 video processor → NV12 / BT.709 SDR 8-bit → MP4"; }
+    InfoLine { label: "UI renderer / preview"; value: root.renderer-label + " · preview presented natively by the capture GPU at panel size, 30 fps (CPU fallback ≤ 960 × 540, 12 fps), paused while minimized"; }
     InfoLine { label: "Encoder configuration"; value: root.encoder-tech; }
     InfoLine { label: "Startup fallback"; value: root.fallback-detail; }
     InfoLine { label: "Detected capabilities"; value: root.hardware-details; }

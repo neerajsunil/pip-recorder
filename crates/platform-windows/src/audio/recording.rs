@@ -47,6 +47,7 @@ impl AudioRecording {
             (epoch.clone(), stop.clone(), end.clone(), failure.clone());
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         let spool_path = path.clone();
+        let bitrate_kbps = config.bitrate_kbps;
         let worker = thread::Builder::new()
             .name("fastrecorder-audio".into())
             .spawn(move || {
@@ -69,7 +70,7 @@ impl AudioRecording {
                         ).inspect_err(|error| feedback.error(false, error.clone()))?);
                     }
                     if worker_stop.load(Ordering::Acquire) { return Err("Audio startup was cancelled.".into()); }
-                    let encoder = AacEncoder::new(&path)
+                    let encoder = AacEncoder::new(&path, config.bitrate_kbps)
                         .map_err(|e| format!("Could not initialize AAC audio: {e}"))?;
                     Ok((apartment, media, endpoints, encoder))
                 })();
@@ -84,12 +85,13 @@ impl AudioRecording {
                     }
                 };
                 let description = format!(
-                    "{} → stereo AAC-LC · 48 kHz · 192 kbps",
+                    "{} → stereo AAC-LC · 48 kHz · {} kbps",
                     endpoints
                         .iter()
                         .map(|endpoint| endpoint.name.as_str())
                         .collect::<Vec<_>>()
-                        .join(" + ")
+                        .join(" + "),
+                    bitrate_kbps
                 );
                 if sender.send(Ok(description)).is_err() {
                     worker_stop.store(true, Ordering::Release);
@@ -164,6 +166,7 @@ impl AudioRecording {
                         sizes,
                         frames: ring.cursor,
                         priming,
+                        bitrate: bitrate_kbps * 1000,
                     })
                 };
                 AudioCompletion { track, error }

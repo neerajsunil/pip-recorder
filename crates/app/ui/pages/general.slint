@@ -1,26 +1,31 @@
-import { CheckBox } from "std-widgets.slint";
-import { ActionButton } from "../components/action-button.slint";
-import { Divider, FieldLabel, InfoLine, SectionTitle } from "../components/labels.slint";
+import { Theme, Brand } from "../theme.slint";
+import { Divider, FieldLabel } from "../components/labels.slint";
+import { IconSegmented } from "../components/segmented.slint";
+import { SettingGroup, SettingRow } from "../components/setting-row.slint";
+import { Switch } from "../components/switch.slint";
 
-// Settings → General: cursor capture, studio behaviour and save location.
+// Settings → Appearance: theme and how much detail Settings shows.
 export component GeneralPage inherits VerticalLayout {
-    in property <bool> busy;
-    in property <string> destination-label;
     in property <string> app-version;
-    in-out property <bool> capture-cursor;
-    in-out property <bool> auto-minimize;
+    in-out property <int> theme-mode;
+    in-out property <bool> show-advanced;
     callback settings-changed();
-    callback choose-destination();
-    alignment: start; spacing: 16px;
-    SectionTitle { text: "Capture"; }
-    CheckBox { text: "Include mouse cursor"; checked <=> root.capture-cursor; enabled: !root.busy; toggled => { root.settings-changed(); } }
+    alignment: start; spacing: 22px;
+    SettingGroup { title: "Appearance";
+        SettingRow { title: "Theme"; description: "System follows your Windows light or dark setting."; control-width: 330px;
+            IconSegmented {
+                options: [{ text: "System", icon: @image-url("../icons/monitor.svg") }, { text: "Light", icon: @image-url("../icons/sun.svg") }, { text: "Dark", icon: @image-url("../icons/moon.svg") }];
+                current: root.theme-mode;
+                selected(index) => { root.theme-mode = index; root.settings-changed(); }
+            }
+        }
+    }
     Divider { }
-    SectionTitle { text: "Studio"; }
-    CheckBox { text: "Minimize when recording starts"; checked <=> root.auto-minimize; enabled: !root.busy; toggled => { root.settings-changed(); } }
+    SettingGroup { title: "Settings";
+        SettingRow { title: "Show advanced options"; description: "Adds encoder, bitrate, frame-rate and audio-quality controls for people who like to tweak. The basics stay the same.";
+            Switch { text: ""; checked <=> root.show-advanced; toggled => { root.settings-changed(); } }
+        }
+    }
     Divider { }
-    SectionTitle { text: "Saving"; }
-    InfoLine { label: "Next recording"; value: root.destination-label; path: true; }
-    ActionButton { height: 36px; width: 150px; text: "Change location"; icon: @image-url("../icons/folder.svg"); enabled: !root.busy; clicked => { root.choose-destination(); } }
-    Divider { }
-    FieldLabel { text: "FastRecorder " + root.app-version; }
+    FieldLabel { text: Brand.name + " " + root.app-version; }
 }

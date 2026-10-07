@@ -25,7 +25,7 @@ impl RecordingTray {
             .to_rgba8()
             .ok_or("Could not rasterize the tray icon")?;
         let icon = Icon::from_rgba(pixels.as_bytes().to_vec(), pixels.width(), pixels.height())?;
-        let open = MenuItem::new("Open FastRecorder", true, None);
+        let open = MenuItem::new("Open Pip", true, None);
         let stop = MenuItem::new("Stop recording", false, None);
         let menu = Menu::with_items(&[&open, &stop])?;
         let open_id = open.id().clone();
@@ -53,7 +53,7 @@ impl RecordingTray {
         let icon = TrayIconBuilder::new()
             .with_icon(icon)
             .with_menu(Box::new(menu))
-            .with_tooltip("FastRecorder")
+            .with_tooltip("Pip")
             .with_menu_on_left_click(false)
             .build()?;
         icon.set_visible(false)?;
@@ -81,7 +81,7 @@ impl RecordingTray {
             SessionState::Stopping => "Saving recording".to_string(),
             SessionState::Idle => "Ready".to_string(),
         };
-        let text = format!("FastRecorder · {status}");
+        let text = format!("Pip · {status}");
         if *self.tooltip.borrow() != text {
             let _ = self.icon.set_tooltip(Some(&text));
             *self.tooltip.borrow_mut() = text;

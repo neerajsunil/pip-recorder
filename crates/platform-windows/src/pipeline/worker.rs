@@ -21,10 +21,7 @@ use std::{
 };
 use windows::{
     Foundation::TypedEventHandler,
-    Graphics::{
-        Capture::*,
-        DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
-    },
+    Graphics::{Capture::*, DirectX::Direct3D11::IDirect3DDevice},
     Win32::{
         Graphics::{Direct3D11::*, Dxgi::*},
         Media::MediaFoundation::*,
@@ -184,8 +181,8 @@ fn record_inner(
     };
     let (device, context, winrt, manager) =
         native().map_err(|e| format!("Could not initialize graphics: {e}"))?;
-    let width = (source.width + 1) & !1;
-    let height = (source.height + 1) & !1;
+    let (width, height) =
+        fastrecorder_core::output_size(source.width, source.height, config.max_height);
     let input_type =
         media_type(width, height, config.fps, &MFVideoFormat_NV12).map_err(|e| e.to_string())?;
     let mut encoder = VideoEncoder::new(
@@ -229,9 +226,11 @@ fn record_inner(
     .map_err(|e| format!("GPU color conversion is unavailable: {e}"))?;
     let latest = Arc::new(std::sync::Mutex::new(None::<CapturedFrame>));
     let (wake_tx, wake_rx) = mpsc::sync_channel(1);
+    let mut color = crate::capture::DisplayColor::for_source(source);
+    let mut format = crate::preview::capture_format(color);
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
         &winrt,
-        DirectXPixelFormat::R16G16B16A16Float,
+        format,
         3,
         source.item.Size().map_err(|e| e.to_string())?,
     )
@@ -291,7 +290,6 @@ fn record_inner(
     let mut last_statistics = Instant::now();
     let mut capture_size = source.item.Size().map_err(|e| e.to_string())?;
     let mut frame_valid = false;
-    let mut color = crate::capture::DisplayColor::for_source(source);
     let mut last_tick = Instant::now();
     let gpu = unsafe {
         device
@@ -359,11 +357,12 @@ fn record_inner(
             if let Some(frame) = frame {
                 let content = frame.ContentSize().map_err(|e| e.to_string())?;
                 if content.Width > 0 && content.Height > 0 {
-                    if content != capture_size {
+                    if content != capture_size || crate::preview::capture_format(color) != format {
                         drop(frame);
+                        format = crate::preview::capture_format(color);
                         capture
                             .pool
-                            .Recreate(&winrt, DirectXPixelFormat::R16G16B16A16Float, 3, content)
+                            .Recreate(&winrt, format, 3, content)
                             .map_err(|e| e.to_string())?;
                         capture_size = content;
                         converter = Converter::new(

@@ -1,0 +1,77 @@
+import { ComboBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ActionButton } from "../components/action-button.slint";
+import { Divider, Hint } from "../components/labels.slint";
+import { Segmented } from "../components/segmented.slint";
+import { SettingGroup, SettingRow } from "../components/setting-row.slint";
+import { Switch } from "../components/switch.slint";
+
+// Settings → Recording: what happens before, during and after a recording, and where it goes.
+export component RecordingPage inherits VerticalLayout {
+    in property <bool> busy;
+    in property <bool> advanced;
+    in property <string> save-folder;
+    in property <string> save-folder-path;
+    in-out property <int> countdown-seconds;
+    in-out property <bool> auto-minimize;
+    in-out property <int> after-save;
+    in-out property <int> auto-stop-minutes;
+    in-out property <string> file-name-pattern;
+    in-out property <int> process-priority;
+    in property <string> source-name;
+    in property <string> next-file;
+    callback settings-changed();
+    callback choose-folder();
+    callback open-folder();
+    alignment: start; spacing: 22px;
+
+    SettingGroup { title: "Saving";
+        Rectangle { height: 64px; border-radius: Theme.radius-m; background: Theme.sunken;
+            HorizontalLayout { padding: 12px; padding-left: 14px; spacing: 12px;
+                Rectangle { width: 40px; height: 40px; border-radius: 12px; background: Theme.surface;
+                    Image { source: @image-url("../icons/folder.svg"); width: 19px; height: 19px; colorize: Theme.accent-ink; }
+                }
+                VerticalLayout { alignment: center; spacing: 2px; horizontal-stretch: 1;
+                    Text { text: root.save-folder; color: Theme.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                    Text { text: root.save-folder-path; color: Theme.ink-soft; font-size: 11px; overflow: elide; }
+                }
+                ActionButton { width: 92px; y: 2px; pill: true; text: "Open"; has-icon: false; label: "Open save folder"; clicked => { root.open-folder(); } }
+                ActionButton { width: 110px; y: 2px; pill: true; text: "Change…"; has-icon: false; label: "Change save folder"; enabled: !root.busy; clicked => { root.choose-folder(); } }
+            }
+        }
+        SettingRow { title: "After saving"; description: "What Pip does when your video is ready.";
+            Segmented { options: ["Nothing", "Show file", "Play it"]; current: root.after-save; enabled: !root.busy;
+                selected(index) => { root.after-save = index; root.settings-changed(); } }
+        }
+    }
+    Divider { }
+    SettingGroup { title: "Starting";
+        SettingRow { title: "Countdown"; description: "A few seconds to get ready. Press Record again to cancel.";
+            Segmented { options: ["Off", "3 s", "5 s", "10 s"]; enabled: !root.busy;
+                current: root.countdown-seconds == 3 ? 1 : root.countdown-seconds == 5 ? 2 : root.countdown-seconds == 10 ? 3 : 0;
+                selected(index) => { root.countdown-seconds = [0, 3, 5, 10][index]; root.settings-changed(); } }
+        }
+        SettingRow { title: "Get out of the way"; description: "Minimize Pip once recording starts. Stop from the tray or your shortcut.";
+            Switch { text: ""; checked <=> root.auto-minimize; enabled: !root.busy; toggled => { root.settings-changed(); } }
+        }
+    }
+    if root.advanced: Divider { }
+    if root.advanced: SettingGroup { title: "Files and performance"; advanced: true;
+        SettingRow { title: "File name"; description: "Use {date}, {time}, {source}, or {year} {month} {day} {hour} {minute} {second}. A number is added instead of overwriting.";
+            LineEdit { text <=> root.file-name-pattern; placeholder-text: "{year}-{month}-{day}-{hour}-{minute}-{second}"; enabled: !root.busy; edited => { root.settings-changed(); } }
+        }
+        Hint { text: "Next file: " + root.next-file; wrap: char-wrap; }
+        SettingRow { title: "Process priority"; description: "Above normal helps recordings keep up while a game uses the CPU. High can make other apps feel slower.";
+            ComboBox { model: ["Normal", "Above normal", "High"]; current-index <=> root.process-priority; enabled: !root.busy; selected => { root.settings-changed(); } }
+        }
+    }
+    if root.advanced: Divider { }
+    if root.advanced: SettingGroup { title: "Limits"; advanced: true;
+        SettingRow { title: "Stop automatically"; description: "End and save the recording after a set time.";
+            ComboBox { model: ["Never", "After 5 minutes", "After 10 minutes", "After 15 minutes", "After 30 minutes", "After 1 hour", "After 2 hours"]; enabled: !root.busy;
+                current-index: root.auto-stop-minutes == 5 ? 1 : root.auto-stop-minutes == 10 ? 2 : root.auto-stop-minutes == 15 ? 3 : root.auto-stop-minutes == 30 ? 4 : root.auto-stop-minutes == 60 ? 5 : root.auto-stop-minutes == 120 ? 6 : 0;
+                selected => { root.auto-stop-minutes = [0, 5, 10, 15, 30, 60, 120][self.current-index]; root.settings-changed(); }
+            }
+        }
+    }
+}

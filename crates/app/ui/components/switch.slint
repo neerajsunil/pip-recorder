@@ -1,0 +1,27 @@
+import { Theme } from "../theme.slint";
+
+// A labelled on/off switch with the same surface as std CheckBox (text, checked, enabled, toggled).
+export component Switch inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled();
+    forward-focus: focus;
+    accessible-role: switch; accessible-label: text; accessible-checked: checked; accessible-enabled: enabled;
+    accessible-action-default => { if root.enabled { root.checked = !root.checked; root.toggled(); } }
+    height: 28px;
+    min-width: track.width + 12px + label.preferred-width;
+    opacity: enabled ? 1 : 0.55;
+    track := Rectangle { x: 0; y: (root.height - self.height) / 2; width: 38px; height: 22px; border-radius: 11px;
+        background: root.checked ? Theme.lilac-deep : Theme.line-strong;
+        border-width: focus.has-focus ? 2px : 0px; border-color: Theme.lilac-line;
+        animate background { duration: 140ms; }
+        Rectangle { x: root.checked ? parent.width - self.width - 3px : 3px; y: 3px; width: 16px; height: 16px; border-radius: 8px; background: #ffffff;
+            drop-shadow-blur: 3px; drop-shadow-color: #2b223830; drop-shadow-offset-y: 1px;
+            animate x { duration: 160ms; easing: ease-out; }
+        }
+    }
+    label := Text { x: track.width + 12px; height: root.height; text: root.text; color: Theme.ink; font-size: 13px; vertical-alignment: center; }
+    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if (event.text == " " || event.text == Key.Return) { root.checked = !root.checked; root.toggled(); return accept; } return reject; } }
+    TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.checked = !root.checked; root.toggled(); } }
+}

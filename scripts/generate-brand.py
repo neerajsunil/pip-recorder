@@ -1,4 +1,4 @@
-"""Regenerate the code-drawn project icon and documentation sample (Pillow).
+"""Regenerate the code-drawn Pip icon and documentation sample (Pillow).
 
 These are vector-like brand assets, not screenshots of a user's desktop.
 Usage: python scripts/generate-brand.py
@@ -8,11 +8,27 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 SCALE = 4
-icon = Image.new("RGBA", (1024, 1024))
+# Pip: same 128-unit geometry as crates/app/ui/icon.svg and components/pip.slint.
+U = 8
+icon = Image.new("RGBA", (128 * U, 128 * U))
 d = ImageDraw.Draw(icon)
-d.rounded_rectangle((0, 0, 1023, 1023), radius=272, fill="#6852df")
-d.rounded_rectangle((248, 248, 776, 776), radius=160, outline="white", width=56)
-d.ellipse((408, 408, 616, 616), fill="white")
+box = lambda x, y, w, h: (x * U, y * U, (x + w) * U, (y + h) * U)
+d.rounded_rectangle(box(76, 6, 28, 20), radius=9 * U, fill="#6656e0")
+d.rounded_rectangle(box(10, 16, 108, 104), radius=42 * U, fill="#8b7cf6")
+sheen = Image.new("RGBA", icon.size)
+ImageDraw.Draw(sheen).rounded_rectangle(box(26, 25, 22, 9), radius=4.5 * U, fill=(255, 255, 255, 71))
+icon.alpha_composite(sheen)
+d = ImageDraw.Draw(icon)
+for x in (17, 93):
+    d.rounded_rectangle(box(x, 82, 18, 11), radius=5.5 * U, fill="#ffb8c8")
+d.ellipse(box(35, 33, 58, 58), fill="white")
+d.ellipse(box(49, 47, 30, 30), fill="#ff6b7d")
+d.ellipse(box(69, 50, 9, 9), fill="white")
+smile = [(54 + 20 * t, 99 + 16 * t * (1 - t)) for t in (i / 24 for i in range(25))]
+d.line([(x * U, y * U) for x, y in smile], fill="#2b2238", width=int(4.5 * U), joint="curve")
+for x, y in (smile[0], smile[-1]):
+    r = 2.25 * U
+    d.ellipse((x * U - r, y * U - r, x * U + r, y * U + r), fill="#2b2238")
 icon = icon.resize((256, 256), Image.Resampling.LANCZOS)
 assets = ROOT / "crates/app/assets"
 images = ROOT / "docs/images"

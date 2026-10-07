@@ -1,0 +1,47 @@
+import { Theme } from "../theme.slint";
+
+// Recording volume 0–200 % with a mark at 100 %. Arrow keys step by 5 %.
+export component VolumeSlider inherits Rectangle {
+    in-out property <int> value: 100;
+    in property <bool> enabled: true;
+    in property <string> label: "Recording volume";
+    callback edited();
+    private property <length> track-x: 0px;
+    private property <length> track-width: root.width - 56px;
+    private property <float> ratio: max(0, min(200, root.value)) / 200;
+    height: 28px;
+    forward-focus: focus;
+    accessible-role: slider; accessible-label: label; accessible-value: root.value + "%";
+    accessible-value-minimum: 0; accessible-value-maximum: 200; accessible-value-step: 5; accessible-enabled: enabled;
+    accessible-action-increment => { root.set(root.value + 5); }
+    accessible-action-decrement => { root.set(root.value - 5); }
+    opacity: enabled ? 1 : 0.55;
+    function set(next: int) {
+        let clamped = max(0, min(200, next));
+        if clamped != root.value { root.value = clamped; root.edited(); }
+    }
+    Rectangle { x: track-x; y: (root.height - self.height) / 2; width: track-width; height: 6px; border-radius: 3px; background: Theme.sunken;
+        Rectangle { x: 0; width: parent.width * root.ratio; height: parent.height; border-radius: 3px; background: Theme.lilac; }
+        Rectangle { x: parent.width / 2 - 1px; y: -3px; width: 2px; height: 12px; border-radius: 1px; background: Theme.line-strong; }
+    }
+    Rectangle { x: track-x + track-width * root.ratio - self.width / 2; y: (root.height - self.height) / 2; width: 18px; height: 18px; border-radius: 9px;
+        background: Theme.surface; border-width: focus.has-focus ? 3px : 2px; border-color: Theme.lilac-deep;
+        drop-shadow-blur: 3px; drop-shadow-color: Theme.shadow; drop-shadow-offset-y: 1px;
+    }
+    Text { x: root.width - 46px; width: 46px; height: root.height; text: root.value + "%"; color: Theme.ink; font-size: 13px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+    focus := FocusScope { enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.RightArrow || event.text == Key.UpArrow) { root.set(root.value + 5); return accept; }
+            if (event.text == Key.LeftArrow || event.text == Key.DownArrow) { root.set(root.value - 5); return accept; }
+            if (event.text == Key.Home) { root.set(0); return accept; }
+            if (event.text == Key.End) { root.set(200); return accept; }
+            return reject;
+        }
+    }
+    TouchArea { x: 0; width: root.track-width + 9px; enabled: root.enabled; mouse-cursor: pointer;
+        pointer-event(event) => { if event.kind == PointerEventKind.down { focus.focus(); } }
+        moved => { if self.pressed { root.set(round(max(0, min(1, self.mouse-x / root.track-width)) * 40) * 5); } }
+        clicked => { root.set(round(max(0, min(1, self.mouse-x / root.track-width)) * 40) * 5); }
+        double-clicked => { root.set(100); }
+    }
+}

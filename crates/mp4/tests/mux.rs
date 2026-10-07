@@ -230,6 +230,7 @@ fn aac_track(dir: &TempDir, packets: usize) -> AacTrack {
         sizes,
         frames: packets as u64 * 1024,
         priming: 1024,
+        bitrate: 192_000,
     }
 }
 

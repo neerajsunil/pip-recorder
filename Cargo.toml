@@ -12,10 +12,24 @@ fastrecorder-core = { path = "crates/core" }
 fastrecorder-mp4 = { path = "crates/mp4" }
 fastrecorder-platform = { path = "crates/platform" }
 fastrecorder-windows = { path = "crates/platform-windows" }
-slint = { version = "~1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-femtovg-wgpu", "renderer-software", "accessibility", "compat-1-18", "raw-window-handle-06", "unstable-winit-030"] }
-windows = { version = "0.62.2", features = ["Foundation", "Security_Authorization_AppCapabilityAccess", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Devices_Display", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dwm", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Media_MediaFoundation", "Win32_Media_Audio", "Win32_Devices_FunctionDiscovery", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Performance", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+slint = { version = "~1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-18", "raw-window-handle-06", "unstable-winit-030"] }
+windows = { version = "0.62.2", features = ["Foundation", "Security_Authorization_AppCapabilityAccess", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Devices_Display", "Win32_Graphics_Direct3D11", "Win32_Security", "Win32_Graphics_Dwm", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Media_MediaFoundation", "Win32_Media_Audio", "Win32_Devices_FunctionDiscovery", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Performance", "Win32_System_Registry", "Win32_System_LibraryLoader", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 
+# Shipping builds: smallest, fastest binary. Slow to rebuild (~2 min after any change).
 [profile.release]
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+# Day-to-day testing: optimized like release, but parallel and incremental so a
+# change rebuilds in seconds. `cargo build --profile fast` -> target/fast/.
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+
+# Debug builds run their dependencies optimized (capture, encoding, UI
+# rendering stay responsive) while Pip's own crates keep fast incremental builds.
+[profile.dev.package."*"]
+opt-level = 2
