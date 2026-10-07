@@ -15,7 +15,7 @@ try {
     $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
     if ([BitConverter]::ToUInt16($bytes, $peOffset + 4) -ne 0x8664) { throw 'Expected a Windows x64 executable.' }
     $distribution = Join-Path $projectRoot 'dist'
-    $name = "FastRecorder-$Version-windows-x64"
+    $name = "Pip-$Version-windows-x64"
     $staging = Join-Path $distribution $name
     if (Test-Path -LiteralPath $staging) { throw "Package directory exists; choose a new version or move it first: $staging" }
     New-Item -ItemType Directory -Path $staging -Force | Out-Null
@@ -53,7 +53,7 @@ try {
     }
     $lines | Set-Content -LiteralPath (Join-Path $staging 'DEPENDENCY_LICENSES.md') -Encoding utf8
     $toolchain = & $cargoPath --version
-    @("FastRecorder $Version", "Target: x86_64-pc-windows-msvc", "Toolchain: $toolchain", "Source: https://github.com/neerajsunil/pip-recorder/tree/v$Version", 'Unsigned preview binary. See README and release readiness before relying on a recording.') |
+    @("Pip $Version", "Target: x86_64-pc-windows-msvc", "Toolchain: $toolchain", "Source: https://github.com/neerajsunil/pip-recorder/tree/v$Version", 'Unsigned preview binary. See README and release readiness before relying on a recording.') |
         Set-Content -LiteralPath (Join-Path $staging 'BUILD_INFO.txt') -Encoding utf8
     $zip = Join-Path $distribution "$name.zip"
     Compress-Archive -LiteralPath $staging -DestinationPath $zip -CompressionLevel Optimal

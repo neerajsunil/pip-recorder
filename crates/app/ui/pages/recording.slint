@@ -39,6 +39,11 @@ export component RecordingPage inherits VerticalLayout {
                 ActionButton { width: 110px; y: 2px; pill: true; text: "Change…"; has-icon: false; label: "Change save folder"; enabled: !root.busy; clicked => { root.choose-folder(); } }
             }
         }
+        if root.advanced: SettingRow { title: "File name"; description: "Pip adds a number instead of overwriting a file.";
+            LineEdit { text <=> root.file-name-pattern; placeholder-text: "{year}-{month}-{day}-{hour}-{minute}-{second}"; enabled: !root.busy; edited => { root.settings-changed(); } }
+        }
+        if root.advanced: Hint { text: "Tags: {date} {time} {source} {year} {month} {day} {hour} {minute} {second}"; }
+        if root.advanced: Hint { text: "Next file: " + root.next-file; overflow: elide; wrap: no-wrap; }
         SettingRow { title: "After saving"; description: "What Pip does when your video is ready.";
             Segmented { options: ["Nothing", "Show file", "Play it"]; current: root.after-save; enabled: !root.busy;
                 selected(index) => { root.after-save = index; root.settings-changed(); } }
@@ -56,22 +61,15 @@ export component RecordingPage inherits VerticalLayout {
         }
     }
     if root.advanced: Divider { }
-    if root.advanced: SettingGroup { title: "Files and performance"; advanced: true;
-        SettingRow { title: "File name"; description: "Use {date}, {time}, {source}, or {year} {month} {day} {hour} {minute} {second}. A number is added instead of overwriting.";
-            LineEdit { text <=> root.file-name-pattern; placeholder-text: "{year}-{month}-{day}-{hour}-{minute}-{second}"; enabled: !root.busy; edited => { root.settings-changed(); } }
-        }
-        Hint { text: "Next file: " + root.next-file; wrap: char-wrap; }
-        SettingRow { title: "Process priority"; description: "Above normal helps recordings keep up while a game uses the CPU. High can make other apps feel slower.";
-            ComboBox { model: ["Normal", "Above normal", "High"]; current-index <=> root.process-priority; enabled: !root.busy; selected => { root.settings-changed(); } }
-        }
-    }
-    if root.advanced: Divider { }
-    if root.advanced: SettingGroup { title: "Limits"; advanced: true;
+    if root.advanced: SettingGroup { title: "While recording";
         SettingRow { title: "Stop automatically"; description: "End and save the recording after a set time.";
             ComboBox { model: ["Never", "After 5 minutes", "After 10 minutes", "After 15 minutes", "After 30 minutes", "After 1 hour", "After 2 hours"]; enabled: !root.busy;
                 current-index: root.auto-stop-minutes == 5 ? 1 : root.auto-stop-minutes == 10 ? 2 : root.auto-stop-minutes == 15 ? 3 : root.auto-stop-minutes == 30 ? 4 : root.auto-stop-minutes == 60 ? 5 : root.auto-stop-minutes == 120 ? 6 : 0;
                 selected => { root.auto-stop-minutes = [0, 5, 10, 15, 30, 60, 120][self.current-index]; root.settings-changed(); }
             }
+        }
+        SettingRow { title: "Process priority"; description: "Above normal helps recordings keep up while a game uses the CPU. High can make other apps feel slower.";
+            ComboBox { model: ["Normal", "Above normal", "High"]; current-index <=> root.process-priority; enabled: !root.busy; selected => { root.settings-changed(); } }
         }
     }
 }

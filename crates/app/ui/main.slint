@@ -30,8 +30,12 @@ export component MainWindow inherits Window {
     background: Theme.canvas; default-font-family: "Segoe UI"; default-font-size: 13px;
         in property <[SourceEntry]> sources;
     in property <[string]> gpu-names;
+    // Format (codec) first, then the encoders on this PC that can make it.
+    in property <[string]> codec-names;
+    in property <int> codec-list-index: 0;
+    in property <int> video-codec: 0; // 0 automatic, 1 AV1, 2 HEVC, 3 H.264
     in property <[string]> encoder-names;
-    in-out property <int> encoder-list-index: 0;
+    in property <int> encoder-list-index: 0;
     in property <image> tray-image: @image-url("icon.svg");
     in property <bool> encoder-available: true;
     in property <string> encoder-status;
@@ -111,7 +115,7 @@ export component MainWindow inherits Window {
     callback refresh-sources(); callback select-source(int); callback choose-destination(); callback open-folder();
     callback toggle-recording(); callback reveal-recording(); callback open-recording(); callback show-details();
     callback settings-changed(); callback refresh-audio-devices(); callback apply-shortcuts();
-    callback encoder-selected(int);
+    callback encoder-selected(int); callback codec-selected(int); callback format-selected(int);
     callback tray-show(); callback tray-stop();
     callback drain-recording-events();
     callback open-link(string);
@@ -369,20 +373,23 @@ export component MainWindow inherits Window {
                     ScrollView { x: 0; y: 0; width: parent.width; height: parent.height; content-width: self.visible-width;
                         VerticalLayout { width: panel.width - 288px; alignment: start; spacing: 18px; padding: 24px;
                             if !root.info-open && root.settings-page == 0: VideoPage {
-                                busy: root.busy; advanced: root.show-advanced; hardware-ready: root.hardware-ready; gpu-names: root.gpu-names; encoder-names: root.encoder-names;
+                                busy: root.busy; advanced: root.show-advanced; hardware-ready: root.hardware-ready; gpu-names: root.gpu-names; encoder-names: root.encoder-names; codec-names: root.codec-names;
+                                codec-list-index: root.codec-list-index; video-codec: root.video-codec; encoder-label: root.encoder-label;
                                 bitrate-detail: root.bitrate-detail; nvenc-controls: root.nvenc-controls; keyframe-controls: root.keyframe-controls;
-                                gpu-choice <=> root.gpu-choice; encoder-list-index <=> root.encoder-list-index; fps <=> root.fps; output-height <=> root.output-height;
+                                gpu-choice <=> root.gpu-choice; encoder-list-index: root.encoder-list-index; fps <=> root.fps; output-height <=> root.output-height;
                                 capture-cursor <=> root.capture-cursor;
                                 bitrate-mode <=> root.bitrate-mode; custom-bitrate <=> root.custom-bitrate; nvenc-preset <=> root.nvenc-preset;
                                 quality-mode <=> root.quality-mode; constant-bitrate <=> root.constant-bitrate; quality-level <=> root.quality-level;
                                 keyframe-seconds <=> root.keyframe-seconds;
                                 software-encoder: root.encoder-choice == 8;
-                                prefer-h264 <=> root.prefer-h264; b-frames <=> root.b-frames; lookahead <=> root.lookahead;
+                                b-frames <=> root.b-frames; lookahead <=> root.lookahead;
                                 spatial-aq <=> root.spatial-aq; temporal-aq <=> root.temporal-aq; multipass <=> root.multipass;
                                 low-latency <=> root.low-latency; max-bitrate <=> root.max-bitrate; software-speed <=> root.software-speed;
                                 bitrate-mbps: root.bitrate-mbps;
                                 settings-changed => { root.settings-changed(); }
                                 encoder-selected(index) => { root.encoder-selected(index); }
+                                codec-selected(index) => { root.codec-selected(index); }
+                                format-selected(index) => { root.format-selected(index); }
                             }
                             if !root.info-open && root.settings-page == 1: AudioPage {
                                 busy: root.busy; advanced: root.show-advanced; audio-ready: root.audio-ready; audio-status: root.audio-status;
@@ -414,7 +421,7 @@ export component MainWindow inherits Window {
                             }
                             if !root.info-open && root.settings-page == 4: GeneralPage {
                                 app-version: root.app-version;
-                                theme-mode <=> root.theme-mode; show-advanced <=> root.show-advanced;
+                                theme-mode <=> root.theme-mode;
                                 settings-changed => { root.settings-changed(); }
                             }
                             if root.info-open: InfoPage {

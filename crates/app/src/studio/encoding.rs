@@ -60,6 +60,64 @@ pub(super) const ENCODER_NAMES: [&str; 9] = [
     "Windows software · H.264",
     "rav1e software · AV1",
 ];
+/// Format choices in Advanced, as (label, codec). The codec numbers match
+/// `video-codec`: 0 automatic, 1 AV1, 2 HEVC, 3 H.264.
+const CODEC_NAMES: [&str; 4] = [
+    "Automatic · smallest",
+    "AV1",
+    "HEVC · H.265",
+    "H.264 · plays everywhere",
+];
+
+/// The format an encoder choice produces (0 when Pip decides).
+fn codec_of(choice: i32, prefer_h264: bool) -> usize {
+    match choice {
+        0 if prefer_h264 => 3,
+        0 => 0,
+        1 | 4 | 8 => 1,
+        2 | 5 => 2,
+        _ => 3,
+    }
+}
+
+/// Encoders on this PC that can make `codec`, as (label, encoder choice).
+fn encoders_for(codec: usize, available: &[usize]) -> Vec<(&'static str, i32)> {
+    let options: &[(&str, i32)] = match codec {
+        1 => &[
+            ("NVIDIA NVENC", 1),
+            ("Intel Quick Sync", 4),
+            ("Software · rav1e (CPU)", 8),
+        ],
+        2 => &[("NVIDIA NVENC", 2), ("Intel Quick Sync", 5)],
+        3 => &[
+            ("Automatic · best available", 0),
+            ("NVIDIA NVENC", 3),
+            ("Intel Quick Sync", 6),
+            ("Software · Windows (CPU)", 7),
+        ],
+        _ => &[],
+    };
+    options
+        .iter()
+        .copied()
+        .filter(|&(_, choice)| available.contains(&(choice as usize)))
+        .collect()
+}
+
+/// Formats offered in Advanced: HEVC only when some encoder here can make it.
+fn codecs_available(available: &[usize]) -> Vec<usize> {
+    (0..CODEC_NAMES.len())
+        .filter(|&codec| codec == 0 || !encoders_for(codec, available).is_empty())
+        .collect()
+}
+
+fn string_model(values: impl Iterator<Item = &'static str>) -> slint::ModelRc<slint::SharedString> {
+    std::rc::Rc::new(slint::VecModel::from(
+        values.map(slint::SharedString::from).collect::<Vec<_>>(),
+    ))
+    .into()
+}
+
 pub(super) fn encoder_choices(ui: &MainWindow, state: &AppState) -> Vec<usize> {
     let explicit_gpu = if ui.get_gpu_choice() > 0 {
         state.gpus.get((ui.get_gpu_choice() - 1) as usize)
@@ -130,16 +188,19 @@ pub(super) fn update_encoding_labels(ui: &MainWindow, state: &AppState) {
         }
         .into(),
     );
-    ui.set_encoder_names(
-        std::rc::Rc::new(slint::VecModel::from(
-            choices
-                .iter()
-                .map(|&i| slint::SharedString::from(ENCODER_NAMES[i]))
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
+    let codec_index = codec_of(choice as i32, ui.get_prefer_h264());
+    let codecs = codecs_available(&choices);
+    ui.set_video_codec(codec_index as i32);
+    ui.set_codec_names(string_model(codecs.iter().map(|&c| CODEC_NAMES[c])));
+    ui.set_codec_list_index(codecs.iter().position(|&c| c == codec_index).unwrap_or(0) as i32);
+    let encoders = encoders_for(codec_index, &choices);
+    ui.set_encoder_names(string_model(encoders.iter().map(|&(name, _)| name)));
+    ui.set_encoder_list_index(
+        encoders
+            .iter()
+            .position(|&(_, c)| c == choice as i32)
+            .unwrap_or(0) as i32,
     );
-    ui.set_encoder_list_index(choices.iter().position(|&i| i == choice).unwrap_or(0) as i32);
     ui.set_gpu_label(if choice >= 7 {
         "CPU".into()
     } else {
@@ -192,6 +253,13 @@ pub(super) fn update_encoding_labels(ui: &MainWindow, state: &AppState) {
         else { "Explicit selection; codec / vendor failures are reported without switching encoders." }.into());
 }
 
+fn set_encoder(ui: &MainWindow, state: &AppState, choice: i32, h264: bool) {
+    ui.set_encoder_choice(choice);
+    ui.set_prefer_h264(h264);
+    update_encoding_labels(ui, state);
+    persist_preferences(ui, state);
+}
+
 /// Wires encoder selection and probes GPU encoders off the UI thread.
 pub(super) fn install(ui: &MainWindow, state: &Shared) -> std::io::Result<()> {
     let weak = ui.as_weak();
@@ -199,15 +267,41 @@ pub(super) fn install(ui: &MainWindow, state: &Shared) -> std::io::Result<()> {
     ui.on_encoder_selected(move |index| {
         if let Some(ui) = weak.upgrade() {
             let state = encoder_state.locked();
-            let choices = encoder_choices(&ui, &state);
-            if let Some(&choice) = usize::try_from(index)
+            let codec = codec_of(ui.get_encoder_choice(), ui.get_prefer_h264());
+            let encoders = encoders_for(codec, &encoder_choices(&ui, &state));
+            if let Some(&(_, choice)) = usize::try_from(index)
                 .ok()
-                .and_then(|index| choices.get(index))
+                .and_then(|index| encoders.get(index))
             {
-                ui.set_encoder_choice(choice as i32);
-                update_encoding_labels(&ui, &state);
-                persist_preferences(&ui, &state);
+                set_encoder(&ui, &state, choice, codec == 3);
             }
+        }
+    });
+    // Advanced → Format: pick the codec, then the best encoder here that makes it.
+    let weak = ui.as_weak();
+    let codec_state = state.clone();
+    ui.on_codec_selected(move |index| {
+        if let Some(ui) = weak.upgrade() {
+            let state = codec_state.locked();
+            let available = encoder_choices(&ui, &state);
+            let Some(codec) = usize::try_from(index)
+                .ok()
+                .and_then(|index| codecs_available(&available).get(index).copied())
+            else {
+                return;
+            };
+            let choice = encoders_for(codec, &available)
+                .first()
+                .map_or(0, |&(_, choice)| choice);
+            set_encoder(&ui, &state, choice, codec == 3);
+        }
+    });
+    // Simple → Format: smaller files or plays everywhere; Pip picks the encoder.
+    let weak = ui.as_weak();
+    let format_state = state.clone();
+    ui.on_format_selected(move |index| {
+        if let Some(ui) = weak.upgrade() {
+            set_encoder(&ui, &format_state.locked(), 0, index == 1);
         }
     });
     let weak = ui.as_weak();

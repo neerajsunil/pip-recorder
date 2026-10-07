@@ -1,4 +1,4 @@
-# Releasing FastRecorder
+# Releasing Pip
 
 Preview releases must remain marked as GitHub prereleases until the recording/device matrix and known release blockers in [RELEASE_READINESS.md](RELEASE_READINESS.md) are resolved. A successful CI build is not recording/playback validation.
 
@@ -13,7 +13,7 @@ Preview releases must remain marked as GitHub prereleases until the recording/de
 
 ```powershell
 cargo build -p fastrecorder --release --locked
-.\scripts\package-windows.ps1 -Version 0.1.0-alpha.1 -Binary .\target\release\fastrecorder.exe
+.\scripts\package-windows.ps1 -Version 0.2.0-alpha.1 -Binary .\target\release\fastrecorder.exe
 ```
 
 The script stages the binary, release notes, license and third-party notices, generates dependency/license metadata from the lockfile and includes available license files. It produces an x64 ZIP and SHA-256 checksums in dist/. Install current Visual C++ runtime if the native bridge requires it; no driver DLLs or FFmpeg are shipped. Signing is not implemented yet; do not imply a signed build.

@@ -6,24 +6,28 @@ import { SettingGroup, SettingRow } from "../components/setting-row.slint";
 import { Switch } from "../components/switch.slint";
 
 // Settings → Video. Simple answers "how good, how smooth, how big, where will it
-// play". Advanced mirrors OBS: output, rate control, then encoder-specific tuning.
+// play". Advanced swaps those answers for the exact controls behind them, so no
+// setting appears twice.
 export component VideoPage inherits VerticalLayout {
     in property <bool> busy;
     in property <bool> advanced;
     in property <bool> hardware-ready;
     in property <[string]> gpu-names;
     in property <[string]> encoder-names;
+    in property <[string]> codec-names;
+    in property <int> codec-list-index;
+    in property <int> video-codec;
+    in property <string> encoder-label;
     in property <string> bitrate-detail;
     in property <bool> nvenc-controls;
     in property <bool> keyframe-controls;
     in property <bool> software-encoder;
     in property <int> bitrate-mbps;
     in-out property <int> gpu-choice;
-    in-out property <int> encoder-list-index;
+    in property <int> encoder-list-index;
     in-out property <int> fps;
     in-out property <int> output-height;
     in-out property <bool> capture-cursor;
-    in-out property <bool> prefer-h264;
     in-out property <int> bitrate-mode;
     in-out property <int> custom-bitrate;
     in-out property <int> nvenc-preset;
@@ -41,10 +45,16 @@ export component VideoPage inherits VerticalLayout {
     in-out property <int> software-speed;
     callback settings-changed();
     callback encoder-selected(int);
+    callback codec-selected(int);
+    callback format-selected(int);
     private property <bool> cqp: root.quality-mode && root.nvenc-controls;
+    private property <[string]> size-names: ["Same as screen", "2160p · 4K", "1440p · QHD", "1080p · Full HD", "720p · HD"];
+    private property <[int]> size-heights: [0, 2160, 1440, 1080, 720];
+    private property <int> size-index: root.output-height == 2160 ? 1 : root.output-height == 1440 ? 2 : root.output-height == 1080 ? 3 : root.output-height == 720 ? 4 : 0;
     alignment: start; spacing: 22px;
 
-    SettingGroup { title: "Video";
+    // Simple: five plain choices.
+    if !root.advanced: SettingGroup { title: "Video";
         SettingRow { title: "Quality"; description: root.cqp ? "Constant quality is set in Advanced." : root.bitrate-mode == 3 ? "Using a custom bitrate from Advanced." : "Balanced suits most recordings. Best keeps small text sharp but makes bigger files.";
             Segmented { options: ["Smaller", "Balanced", "Best"]; enabled: !root.busy && !root.cqp;
                 current: root.bitrate-mode == 2 ? 0 : root.bitrate-mode == 1 ? 1 : root.bitrate-mode == 0 ? 2 : -1;
@@ -58,15 +68,13 @@ export component VideoPage inherits VerticalLayout {
             }
         }
         SettingRow { title: "Size"; description: "A smaller size makes a smaller file. Pip never makes a recording bigger than your screen.";
-            ComboBox { model: ["Same as screen", "2160p · 4K", "1440p · QHD", "1080p · Full HD", "720p · HD"]; enabled: !root.busy;
-                current-index: root.output-height == 2160 ? 1 : root.output-height == 1440 ? 2 : root.output-height == 1080 ? 3 : root.output-height == 720 ? 4 : 0;
-                selected => { root.output-height = [0, 2160, 1440, 1080, 720][self.current-index]; root.settings-changed(); }
-            }
+            ComboBox { model: root.size-names; enabled: !root.busy; current-index: root.size-index;
+                selected => { root.output-height = root.size-heights[self.current-index]; root.settings-changed(); } }
         }
-        SettingRow { title: "Format"; description: root.prefer-h264 ? "H.264 plays on every phone, browser, editor and chat app." : "AV1 or HEVC when your graphics card has it: about half the size of H.264 at the same quality.";
-            Segmented { options: ["Smaller files", "Plays everywhere"]; enabled: !root.busy;
-                current: root.prefer-h264 ? 1 : 0;
-                selected(index) => { root.prefer-h264 = index == 1; root.settings-changed(); }
+        SettingRow { title: "Format"; description: root.video-codec == 3 ? "H.264 plays on every phone, browser, editor and chat app." : "AV1 or HEVC when your graphics card has it: about half the size of H.264 at the same quality.";
+            Segmented { options: ["Smaller files", "Plays everywhere"]; enabled: !root.busy && root.hardware-ready;
+                current: root.video-codec == 3 ? 1 : 0;
+                selected(index) => { root.format-selected(index); }
             }
         }
         SettingRow { title: "Show mouse pointer"; description: "Include the pointer in the video and the preview.";
@@ -75,35 +83,56 @@ export component VideoPage inherits VerticalLayout {
         Hint { text: root.bitrate-detail; }
     }
 
-    if root.advanced: Divider { }
-    if root.advanced: SettingGroup { title: "Output"; advanced: true;
+    // Advanced: each simple choice is replaced by the exact control behind it,
+    // in the order OBS uses: picture, encoder, rate control, then encoder tuning.
+    if root.advanced: SettingGroup { title: "Picture";
+        SettingRow { title: "Size"; description: "Output resolution. Pip never scales a recording up.";
+            ComboBox { model: root.size-names; enabled: !root.busy; current-index: root.size-index;
+                selected => { root.output-height = root.size-heights[self.current-index]; root.settings-changed(); } }
+        }
         SettingRow { title: "Frame rate"; description: "24 and 25 fps match film and PAL video; 50 fps matches PAL broadcast.";
             ComboBox { model: ["24 fps", "25 fps", "30 fps", "50 fps", "60 fps"]; enabled: !root.busy;
                 current-index: root.fps == 24 ? 0 : root.fps == 25 ? 1 : root.fps == 50 ? 3 : root.fps == 60 ? 4 : 2;
                 selected => { root.fps = [24, 25, 30, 50, 60][self.current-index]; root.settings-changed(); }
             }
         }
-        SettingRow { title: "Graphics card"; description: "The GPU that captures and encodes.";
-            ComboBox { model: root.gpu-names; current-index <=> root.gpu-choice; enabled: !root.busy && root.hardware-ready; selected => { root.settings-changed(); } }
-        }
-        SettingRow { title: "Encoder"; description: "Automatic follows Format: AV1, then HEVC, then H.264 on your hardware.";
-            ComboBox { model: root.encoder-names; current-index <=> root.encoder-list-index; enabled: !root.busy && root.hardware-ready; selected => { root.encoder-selected(self.current-index); } }
+        SettingRow { title: "Show mouse pointer"; description: "Include the pointer in the video and the preview.";
+            Switch { text: ""; checked <=> root.capture-cursor; enabled: !root.busy; toggled => { root.settings-changed(); } }
         }
     }
 
     if root.advanced: Divider { }
-    if root.advanced: SettingGroup { title: "Rate control"; advanced: true;
-        SettingRow { title: "Rate control"; description: root.nvenc-controls ? "VBR saves space, CBR keeps a steady rate, CQP holds a constant quality." : "VBR saves space; CBR keeps a steady rate.";
+    if root.advanced: SettingGroup { title: "Encoder";
+        SettingRow { title: "Graphics card"; description: "The GPU that captures and encodes.";
+            ComboBox { model: root.gpu-names; current-index <=> root.gpu-choice; enabled: !root.busy && root.hardware-ready; selected => { root.settings-changed(); } }
+        }
+        SettingRow { title: "Format"; description: root.video-codec == 0 ? "Pip picks the smallest format your graphics card can make. Now: " + root.encoder-label + "."
+                : root.video-codec == 1 ? "Smallest files. Plays in modern browsers, VLC and recent phones."
+                : root.video-codec == 2 ? "Small files. Plays on Apple devices and most recent PCs."
+                : "Plays on every phone, browser, editor and chat app. Bigger files.";
+            ComboBox { model: root.codec-names; current-index: root.codec-list-index; enabled: !root.busy && root.hardware-ready; selected => { root.codec-selected(self.current-index); } }
+        }
+        if root.video-codec != 0: SettingRow { title: "Encoder"; description: "Only encoders on this PC that can make " + (root.video-codec == 1 ? "AV1" : root.video-codec == 2 ? "HEVC" : "H.264") + " are listed.";
+            ComboBox { model: root.encoder-names; current-index: root.encoder-list-index; enabled: !root.busy && root.hardware-ready; selected => { root.encoder-selected(self.current-index); } }
+        }
+        if root.software-encoder: SettingRow { title: "Speed preset"; description: "Lower is smaller and sharper but needs a much faster CPU. 8 is real-time on most PCs.";
+            ComboBox { model: ["0 · Slowest", "1", "2", "3", "4", "5", "6 · Medium", "7", "8 · Fast", "9", "10 · Fastest"]; current-index <=> root.software-speed; enabled: !root.busy; selected => { root.settings-changed(); } }
+        }
+    }
+
+    if root.advanced: Divider { }
+    if root.advanced: SettingGroup { title: "Rate control";
+        SettingRow { title: "Mode"; description: root.nvenc-controls ? "VBR saves space, CBR keeps a steady rate, CQP holds a constant quality." : "VBR saves space; CBR keeps a steady rate.";
             ComboBox { model: root.nvenc-controls ? ["VBR · variable bitrate", "CBR · constant bitrate", "CQP · constant quality"] : ["VBR · variable bitrate", "CBR · constant bitrate"];
                 enabled: !root.busy;
                 current-index: root.cqp ? 2 : root.constant-bitrate ? 1 : 0;
                 selected => { root.quality-mode = self.current-index == 2; root.constant-bitrate = self.current-index == 1; root.settings-changed(); }
             }
         }
-        if !root.cqp: SettingRow { title: "Bitrate"; description: "Recommended scales with size and frame rate (" + root.bitrate-mbps + " Mbps now).";
-            ComboBox { model: ["High · 1.5×", "Recommended", "Low · 0.65×", "Custom"]; current-index <=> root.bitrate-mode; enabled: !root.busy; selected => { root.settings-changed(); } }
+        if !root.cqp: SettingRow { title: "Bitrate"; description: root.bitrate-mode == 3 ? "Your own target, set below." : "Scales with size and frame rate: " + root.bitrate-mbps + " Mbps now.";
+            ComboBox { model: ["Best · 1.5×", "Balanced · recommended", "Smaller · 0.65×", "Custom"]; current-index <=> root.bitrate-mode; enabled: !root.busy; selected => { root.settings-changed(); } }
         }
-        if root.bitrate-mode == 3 && !root.cqp: SettingRow { title: "Custom bitrate"; description: "Target in megabits per second, 1–100.";
+        if root.bitrate-mode == 3 && !root.cqp: SettingRow { title: "Target bitrate"; description: "Megabits per second, 1–100.";
             SpinBox { value <=> root.custom-bitrate; minimum: 1; maximum: 100; enabled: !root.busy; edited => { root.settings-changed(); } }
         }
         if root.nvenc-controls && !root.cqp && !root.constant-bitrate: SettingRow { title: "Peak bitrate"; description: "Highest VBR rate in Mbps. 0 lets Pip use twice the target.";
@@ -115,10 +144,11 @@ export component VideoPage inherits VerticalLayout {
         if root.keyframe-controls: SettingRow { title: "Keyframe interval"; description: "Seconds between keyframes. Shorter seeks faster; longer saves space.";
             SpinBox { value <=> root.keyframe-seconds; minimum: 1; maximum: 10; enabled: !root.busy; edited => { root.settings-changed(); } }
         }
+        Hint { text: root.bitrate-detail; }
     }
 
     if root.advanced && root.nvenc-controls: Divider { }
-    if root.advanced && root.nvenc-controls: SettingGroup { title: "NVIDIA NVENC"; advanced: true;
+    if root.advanced && root.nvenc-controls: SettingGroup { title: "NVIDIA tuning";
         SettingRow { title: "Preset"; description: "Higher presets look better and use more GPU time. P5 is a good balance.";
             ComboBox { model: ["P1 · Fastest", "P2 · Faster", "P3 · Fast", "P4 · Medium", "P5 · Slow", "P6 · Slower", "P7 · Slowest"]; current-index: root.nvenc-preset - 1; enabled: !root.busy; selected => { root.nvenc-preset = self.current-index + 1; root.settings-changed(); } }
         }
@@ -139,13 +169,6 @@ export component VideoPage inherits VerticalLayout {
         }
         SettingRow { title: "Max B-frames"; description: "Predicted frames between references. Auto uses up to 2, which suits most GPUs.";
             ComboBox { model: ["Auto", "0", "1", "2", "3", "4"]; current-index: root.b-frames + 1; enabled: !root.busy && !root.low-latency; selected => { root.b-frames = self.current-index - 1; root.settings-changed(); } }
-        }
-    }
-
-    if root.advanced && root.software-encoder: Divider { }
-    if root.advanced && root.software-encoder: SettingGroup { title: "Software AV1"; advanced: true;
-        SettingRow { title: "Speed preset"; description: "Lower is smaller and sharper but needs a much faster CPU. 8 is real-time on most PCs.";
-            ComboBox { model: ["0 · Slowest", "1", "2", "3", "4", "5", "6 · Medium", "7", "8 · Fast", "9", "10 · Fastest"]; current-index <=> root.software-speed; enabled: !root.busy; selected => { root.settings-changed(); } }
         }
     }
 }
