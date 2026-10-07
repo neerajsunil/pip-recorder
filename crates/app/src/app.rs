@@ -34,6 +34,9 @@ struct AppState {
     desktop_device: Option<String>,
     microphone_device: Option<String>,
     audio_refresh: u64,
+    audio_channel: native::AudioChannel,
+    audio_monitor: Option<native::AudioMonitor>,
+    meter_config: Option<fastrecorder_core::AudioConfig>,
     #[cfg(feature = "diagnostics")]
     diagnostic: bool,
     #[cfg(feature = "diagnostics")]
@@ -63,7 +66,7 @@ fn persist_preferences(ui: &MainWindow, state: &AppState) {
         state.microphone_device.clone(),
     );
     if let Err(error) = prefs.save() {
-        notify(ui, format!("Preferences could not be saved: {error}"), true);
+        notify_issue(ui, "Couldn't save your settings.", error);
     }
 }
 
@@ -74,9 +77,14 @@ fn refresh_audio_devices(ui: &MainWindow, state: &Arc<Mutex<AppState>>) {
     let generation = {
         let mut state = state.lock().unwrap();
         state.audio_refresh += 1;
+        state.audio_monitor.take();
+        state.audio_channel = native::AudioChannel::default();
+        state.meter_config = None;
         state.audio_refresh
     };
     ui.set_audio_ready(false);
+    ui.set_desktop_audio_error("".into());
+    ui.set_microphone_audio_error("".into());
     ui.set_audio_status("Refreshing audio devices…".into());
     let weak = ui.as_weak();
     let state = state.clone();
@@ -144,7 +152,7 @@ fn refresh_audio_devices(ui: &MainWindow, state: &Arc<Mutex<AppState>>) {
                     }
                     Err(error) => {
                         ui.set_audio_status(error.clone().into());
-                        notify(&ui, error, true);
+                        notify_issue(&ui, "Couldn't find audio devices.", error);
                     }
                 }
             });
@@ -194,8 +202,94 @@ fn hwnd(ui: &MainWindow) -> Result<usize, String> {
 }
 
 fn notify(ui: &MainWindow, message: impl Into<slint::SharedString>, error: bool) {
-    ui.set_notice(message.into());
+    let message = message.into();
+    if error {
+        ui.set_issue_detail(message.clone());
+    }
+    ui.set_notice(message);
     ui.set_notice_error(error);
+}
+
+fn notify_issue(ui: &MainWindow, summary: &str, detail: impl std::fmt::Display) {
+    let detail = detail.to_string();
+    crate::logging::write(&format!("{summary} {detail}"));
+    notify(ui, summary, true);
+    ui.set_issue_detail(detail.into());
+}
+
+fn audio_config(ui: &MainWindow, state: &AppState) -> fastrecorder_core::AudioConfig {
+    fastrecorder_core::AudioConfig {
+        desktop: ui.get_desktop_audio(),
+        microphone: ui.get_microphone_audio(),
+        desktop_device: state.desktop_device.clone(),
+        microphone_device: state.microphone_device.clone(),
+        desktop_volume: ui.get_desktop_volume() as u32,
+        microphone_volume: ui.get_microphone_volume() as u32,
+    }
+}
+
+fn update_audio_feedback(ui: &MainWindow, state: &mut AppState) {
+    let idle = state.session.state() == SessionState::Idle;
+    if idle {
+        let visible = !ui.window().is_minimized() && ui.window().is_visible();
+        let config = audio_config(ui, state);
+        let requested = (visible && ui.get_audio_ready() && config.enabled()).then_some(config);
+        if requested != state.meter_config {
+            state.audio_monitor.take(); // Signal stop; device teardown stays off the UI thread.
+            state.audio_channel = native::AudioChannel::default();
+            state.meter_config = requested.clone();
+            ui.set_desktop_audio_error("".into());
+            ui.set_microphone_audio_error("".into());
+            if let Some(mut config) = requested {
+                // A missing saved endpoint must never silently meter the default device.
+                if config.desktop && ui.get_desktop_audio_device() < 0 {
+                    config.desktop = false;
+                    ui.set_desktop_audio_error(
+                        "Saved playback device is disconnected. Choose another device.".into(),
+                    );
+                }
+                if config.microphone && ui.get_microphone_audio_device() < 0 {
+                    config.microphone = false;
+                    ui.set_microphone_audio_error(
+                        "Saved microphone is disconnected. Choose another device.".into(),
+                    );
+                }
+                match native::AudioMonitor::start(config, state.audio_channel.clone()) {
+                    Ok(monitor) => state.audio_monitor = Some(monitor),
+                    Err(error) => ui.set_audio_status(error.into()),
+                }
+            }
+        }
+    }
+    let peaks = state.audio_channel.take_peaks();
+    let level = |peak: f32, previous: f32, enabled: bool| -> f32 {
+        if !enabled {
+            return 0.;
+        }
+        let measured = if peak > 0.001 {
+            ((20. * peak.log10() + 60.) / 60.).clamp(0., 1.)
+        } else {
+            0.
+        };
+        measured.max(previous * 0.82)
+    };
+    ui.set_desktop_level(level(
+        peaks[0],
+        ui.get_desktop_level(),
+        ui.get_desktop_audio(),
+    ));
+    ui.set_microphone_level(level(
+        peaks[1],
+        ui.get_microphone_level(),
+        ui.get_microphone_audio(),
+    ));
+    let errors = state.audio_channel.errors();
+    if let Some(error) = &errors[0] {
+        ui.set_desktop_audio_error(error.clone().into());
+    }
+    if let Some(error) = &errors[1] {
+        ui.set_microphone_audio_error(error.clone().into());
+    }
 }
 
 fn restore_studio(ui: &MainWindow) {
@@ -262,6 +356,9 @@ fn install_surface_recovery(ui: &MainWindow) {
                 schedule_surface_refresh(&weak, &pending);
             }
             WindowEvent::Focused(true) => schedule_surface_refresh(&weak, &pending),
+            WindowEvent::Occluded(false) | WindowEvent::ScaleFactorChanged { .. } => {
+                schedule_surface_refresh(&weak, &pending)
+            }
             _ => {}
         }
         EventResult::Propagate
@@ -432,8 +529,8 @@ fn update_encoding_labels(ui: &MainWindow, state: &AppState) {
             || encoder.starts_with("Intel")
             || codec == fastrecorder_core::Codec::Av1,
     );
-    ui.set_encoder_tech(if encoder.starts_with("NVIDIA") { format!("NVENC API 12.1 ABI · P{} · high-quality tuning · spatial AQ · {} · P-only / no lookahead · {}s keyframes", ui.get_nvenc_preset(), if ui.get_quality_mode() { format!("CQP {} · single pass", ui.get_quality_level()) } else { format!("{} · two-pass quarter resolution", if ui.get_constant_bitrate() { "CBR" } else { "VBR" }) }, ui.get_keyframe_seconds()) }
-        else if encoder.starts_with("Intel") { format!("Intel oneVPL / Media SDK · hardware · TU1 best-quality request · {} · no B-frames · {}s keyframes · NV12 readback", if ui.get_constant_bitrate() { "CBR" } else { "VBR" }, ui.get_keyframe_seconds()) }
+    ui.set_encoder_tech(if encoder.starts_with("NVIDIA") { format!("NVENC API 12.1 ABI · P{} · HQ / spatial AQ request · {} · up to 2 B-frames · 8–16-frame lookahead / B-reference when supported · {}s keyframes", ui.get_nvenc_preset(), if ui.get_quality_mode() { format!("CQP {} · single pass", ui.get_quality_level()) } else { format!("{} · two-pass quarter resolution", if ui.get_constant_bitrate() { "CBR" } else { "VBR" }) }, ui.get_keyframe_seconds()) }
+        else if encoder.starts_with("Intel") { format!("Intel oneVPL / Media SDK · hardware · TU1 / up to 3 B-frames request · {} · {}s keyframes · NV12 readback", if ui.get_constant_bitrate() { "CBR" } else { "VBR" }, ui.get_keyframe_seconds()) }
         else if codec == fastrecorder_core::Codec::Av1 { "rav1e 0.8.1 · Rust · speed 8 · P-only · 8-frame lookahead · CPU NV12 input".into() }
         else { "Windows Media Foundation · H.264 · driver / Windows rate control".into() }.into());
     ui.set_encoder_label(encoder.into());
@@ -490,11 +587,7 @@ fn assign_destination(ui: &MainWindow, state: &mut AppState) {
             ui.set_destination_selected(true);
             state.destination = Some(path);
         }
-        Err(error) => notify(
-            ui,
-            format!("Could not prepare a save location: {error}"),
-            true,
-        ),
+        Err(error) => notify_issue(ui, "Couldn't prepare the recording folder.", error),
     }
 }
 
@@ -536,7 +629,7 @@ fn refresh_sources(ui: &MainWindow, state: &Arc<Mutex<AppState>>) {
             ui.set_sources(std::rc::Rc::new(slint::VecModel::from(rows)).into());
             state.sources = sources;
         }
-        Err(error) => notify(ui, format!("Could not list sources: {error}"), true),
+        Err(error) => notify_issue(ui, "Couldn't find screens or windows.", error),
     }
 }
 
@@ -575,7 +668,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
                 state.last_file = Some(path);
             }
         }
-        Err(error) => notify(&ui, error, true),
+        Err(error) => notify_issue(&ui, "Couldn't load your saved settings.", error),
     }
     let tray: TrayHandle = std::rc::Rc::new(std::cell::RefCell::new(None));
     let (event_sender, event_receiver) = std::sync::mpsc::sync_channel(32);
@@ -609,10 +702,10 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
 
     let weak = ui.as_weak();
     ui.on_show_details(move || {
-        if let Some(ui) = weak.upgrade()
-            && let Ok(owner) = hwnd(&ui)
-        {
-            native::show_details(owner, ui.get_notice().as_str());
+        if let Some(ui) = weak.upgrade() {
+            ui.set_source_open(false);
+            ui.set_settings_open(true);
+            ui.set_info_open(true);
         }
     });
 
@@ -676,7 +769,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
                 state.selected_candidate = None;
                 ui.set_source_selected(false);
                 ui.set_selected_source(-1);
-                notify(&ui, format!("Could not select source: {error}"), true);
+                notify_issue(&ui, "Choose another screen or window.", error);
             }
         }
     });
@@ -692,7 +785,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
         let owner = match hwnd(&ui) {
             Ok(owner) => owner,
             Err(e) => {
-                notify(&ui, e, true);
+                notify_issue(&ui, "Couldn't open the save dialog.", e);
                 return;
             }
         };
@@ -717,7 +810,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
                 notify(&ui, "", false);
             }
             Ok(None) => {}
-            Err(e) => notify(&ui, format!("Could not choose a save location: {e}"), true),
+            Err(e) => notify_issue(&ui, "Couldn't choose a save location.", e),
         }
     });
 
@@ -772,7 +865,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
             match candidate.open() {
                 Ok(source) => source,
                 Err(error) => {
-                    notify(&ui, error, true);
+                    notify_issue(&ui, "Choose another screen or window.", error);
                     return;
                 }
             }
@@ -804,14 +897,10 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
                 let diagnostic = cfg!(feature = "diagnostics")
                     && std::env::args().any(|arg| arg == "--self-test-record")
                     && !std::env::args().any(|arg| arg == "--with-audio");
-                fastrecorder_core::AudioConfig {
-                    desktop: ui.get_desktop_audio() && !diagnostic,
-                    microphone: ui.get_microphone_audio() && !diagnostic,
-                    desktop_device: state.desktop_device.clone(),
-                    microphone_device: state.microphone_device.clone(),
-                    desktop_volume: ui.get_desktop_volume() as u32,
-                    microphone_volume: ui.get_microphone_volume() as u32,
-                }
+                let mut config = audio_config(&ui, &state);
+                config.desktop &= !diagnostic;
+                config.microphone &= !diagnostic;
+                config
             },
             encoder: if ui.get_software_encoder()
                 || cfg!(feature = "diagnostics")
@@ -831,9 +920,9 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
             }
             return;
         }
-        if let Some(mut old) = state.recording.take() {
-            old.join();
-        }
+        // A terminal event means media finalization is complete. Retiring COM
+        // resources must not block the studio while the next recording starts.
+        state.recording.take();
         state.preview.take();
         // Separate channels prevent a retiring preview from publishing stale pixels.
         state.preview_channel = native::PreviewChannel::default();
@@ -860,22 +949,37 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
         notify(&ui, "", false);
         let event_weak = ui.as_weak();
         let preview_channel = state.preview_channel.clone();
+        let audio_monitor = state.audio_monitor.take();
+        state.meter_config = None;
+        state.audio_channel = native::AudioChannel::default();
+        ui.set_desktop_audio_error("".into());
+        ui.set_microphone_audio_error("".into());
+        let audio_channel = state.audio_channel.clone();
         let event_sender = event_sender.clone();
-        match Recording::start(source, config, preview_channel, move |event| {
-            match event_sender.try_send(event) {
-                Ok(()) => {}
-                Err(std::sync::mpsc::TrySendError::Full(RecordingEvent::Statistics { .. })) => {
-                    return;
-                }
-                Err(std::sync::mpsc::TrySendError::Full(event)) => {
-                    if event_sender.send(event).is_err() {
+        match Recording::start(
+            source,
+            config,
+            preview_channel,
+            audio_channel,
+            audio_monitor,
+            move |event| {
+                match event_sender.try_send(event) {
+                    Ok(()) => {}
+                    Err(std::sync::mpsc::TrySendError::Full(RecordingEvent::Statistics {
+                        ..
+                    })) => {
                         return;
                     }
+                    Err(std::sync::mpsc::TrySendError::Full(event)) => {
+                        if event_sender.send(event).is_err() {
+                            return;
+                        }
+                    }
+                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return,
                 }
-                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return,
-            }
-            let _ = event_weak.upgrade_in_event_loop(|ui| ui.invoke_drain_recording_events());
-        }) {
+                let _ = event_weak.upgrade_in_event_loop(|ui| ui.invoke_drain_recording_events());
+            },
+        ) {
             Ok(recording) => state.recording = Some(recording),
             Err(e) => {
                 state.session.finished();
@@ -888,7 +992,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
                     state.preview =
                         native::Preview::start(source, state.preview_channel.clone()).ok();
                 }
-                notify(&ui, e, true);
+                notify_issue(&ui, "Couldn't start recording.", e);
             }
         }
         let clock_tray = recording_tray.clone();
@@ -909,7 +1013,17 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
                 let elapsed: slint::SharedString =
                     format!("{:02}:{:02}", seconds / 60, seconds % 60).into();
                 ui.set_elapsed(elapsed.clone());
-                ui.set_window_title(format!("FastRecorder · Recording {elapsed}").into());
+                ui.set_window_title(
+                    format!(
+                        "FastRecorder · {} {elapsed}",
+                        if state.session.state() == SessionState::Stopping {
+                            "Saving"
+                        } else {
+                            "Recording"
+                        }
+                    )
+                    .into(),
+                );
                 if let Some(tray) = clock_tray.borrow().as_ref() {
                     tray.update(state.session.state(), elapsed.as_str());
                 }
@@ -925,11 +1039,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
             && let Err(e) = native::reveal_recording(&file)
             && let Some(ui) = weak.upgrade()
         {
-            notify(
-                &ui,
-                format!("Could not open the recording folder: {e}"),
-                true,
-            );
+            notify_issue(&ui, "Couldn't open the recording folder.", e);
         }
     });
     let open_state = state.clone();
@@ -940,7 +1050,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
             && let Err(error) = native::open_recording(&file)
             && let Some(ui) = weak.upgrade()
         {
-            notify(&ui, error, true);
+            notify_issue(&ui, "Couldn't open the video player.", error);
         }
     });
 
@@ -1039,11 +1149,7 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
             Ok(tray) => *startup_tray.borrow_mut() = Some(tray),
             Err(error) => {
                 ui.set_auto_minimize(false);
-                notify(
-                    &ui,
-                    format!("Could not create recording tray controls: {error}"),
-                    true,
-                );
+                notify_issue(&ui, "Tray controls aren't available.", error);
             }
         }
         let state = startup_state;
@@ -1053,10 +1159,10 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
             let own_window_diagnostic = cfg!(feature = "diagnostics")
                 && std::env::args().any(|arg| arg == "--self-test-record");
             if !own_window_diagnostic && let Err(error) = native::exclude_from_capture(owner) {
-                notify(
+                notify_issue(
                     &ui,
-                    format!("Could not exclude studio from display capture: {error}"),
-                    true,
+                    "The studio may appear in your recording.",
+                    error.to_string(),
                 );
             }
         }
@@ -1192,13 +1298,21 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(error) => {
                         ui.set_hardware_details(error.clone().into());
-                        notify(&ui, error, true);
+                        notify_issue(&ui, "Couldn't check graphics hardware.", error);
                     }
                 }
                 ui.set_hardware_ready(true);
             });
         })?;
     let preview_timer = Timer::default();
+    let audio_timer = Timer::default();
+    let audio_weak = ui.as_weak();
+    let audio_state = state.clone();
+    audio_timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
+        if let Some(ui) = audio_weak.upgrade() {
+            update_audio_feedback(&ui, &mut audio_state.lock().unwrap());
+        }
+    });
     let weak = ui.as_weak();
     let preview_state = state.clone();
     preview_timer.start(TimerMode::Repeated, Duration::from_millis(83), move || {
@@ -1249,6 +1363,10 @@ pub fn run(ui: MainWindow) -> Result<(), Box<dyn std::error::Error>> {
     timer.stop();
     settings_timer.stop();
     preview_timer.stop();
+    audio_timer.stop();
+    if let Some(mut monitor) = state.lock().unwrap().audio_monitor.take() {
+        monitor.join();
+    }
     if let Some(mut preview) = state.lock().unwrap().preview.take() {
         preview.join();
     }
@@ -1326,7 +1444,12 @@ fn handle_event(
             }
         }
         RecordingEvent::Finished { file, error } => {
+            let never_started = state.started.is_none();
+            let cancelled = state.session.state() == SessionState::Stopping
+                && file.is_none()
+                && error.is_none();
             state.session.finished();
+            state.recording.take();
             state.started = None;
             ui.set_session_state(0);
             ui.set_window_title("FastRecorder".into());
@@ -1372,24 +1495,35 @@ fn handle_event(
                 state.last_file = Some(file.clone());
                 assign_destination(ui, &mut state);
                 persist_preferences(ui, &state);
-                notify(
-                    ui,
-                    error
-                        .as_ref()
-                        .map(|e| format!("Saved, but recording ended early: {e}"))
-                        .unwrap_or_else(|| "Recording saved.".into()),
-                    error.is_some(),
-                );
+                if let Some(error) = &error {
+                    notify_issue(ui, "Recording saved with an issue.", error.as_str());
+                } else {
+                    notify(ui, "Recording saved.", false);
+                }
                 #[cfg(feature = "diagnostics")]
                 println!("SAVED {}", file.display());
             } else {
-                notify(
-                    ui,
-                    error
-                        .clone()
-                        .unwrap_or_else(|| "No recording was saved.".into()),
-                    true,
-                );
+                if let Some(error) = &error {
+                    notify_issue(
+                        ui,
+                        if never_started {
+                            "Couldn't start recording."
+                        } else {
+                            "Couldn't save the recording."
+                        },
+                        error.as_str(),
+                    );
+                } else {
+                    notify(
+                        ui,
+                        if cancelled {
+                            "Recording cancelled."
+                        } else {
+                            "No recording was saved."
+                        },
+                        !cancelled,
+                    );
+                }
                 #[cfg(feature = "diagnostics")]
                 eprintln!(
                     "RECORDING FAILED: {}",

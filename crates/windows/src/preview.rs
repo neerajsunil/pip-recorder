@@ -1,7 +1,7 @@
 use crate::{
     Source,
     hardware::create_device,
-    native::{Capture, texture},
+    native::{Capture, CapturedFrame, texture},
 };
 use std::{
     mem::ManuallyDrop,
@@ -129,7 +129,7 @@ fn run(
         .map_err(|e| e.to_string())?;
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
         &winrt,
-        DirectXPixelFormat::B8G8R8A8UIntNormalized,
+        DirectXPixelFormat::R16G16B16A16Float,
         2,
         source.item.Size().map_err(|e| e.to_string())?,
     )
@@ -154,7 +154,10 @@ fn run(
                 &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new(
                     move |pool, _| {
                         if let Ok(frame) = pool.ok()?.TryGetNextFrame() {
-                            *slot.lock().unwrap() = Some(frame);
+                            let frame = CapturedFrame(frame);
+                            if let Ok(mut slot) = slot.lock() {
+                                *slot = Some(frame);
+                            }
                             let _ = tx.try_send(());
                         }
                         Ok(())
@@ -184,6 +187,9 @@ fn run(
         .map_err(|e| format!("Could not configure borderless preview: {e}"))?;
     capture.session.StartCapture().map_err(|e| e.to_string())?;
     let mut renderer = PreviewRenderer::default();
+    let mut converter = None;
+    let mut color = crate::color::DisplayColor::for_source(&source);
+    let mut color_check = Instant::now();
     let mut size = source.item.Size().map_err(|e| e.to_string())?;
     let mut due = Instant::now();
     let mut frame_deadline = Instant::now() + Duration::from_secs(8);
@@ -210,7 +216,10 @@ fn run(
         if Instant::now() < due || !channel.enabled.load(Ordering::Acquire) {
             continue;
         }
-        let frame = latest.lock().unwrap().take(); // Release the slot before GPU work or pool recreation.
+        let frame = latest
+            .lock()
+            .map_err(|_| "Preview synchronization failed.".to_string())?
+            .take(); // Release the slot before GPU work or pool recreation.
         if let Some(frame) = frame {
             let content = frame.ContentSize().map_err(|e| e.to_string())?;
             if content.Width <= 0 || content.Height <= 0 {
@@ -220,14 +229,10 @@ fn run(
                 drop(frame);
                 capture
                     .pool
-                    .Recreate(
-                        &winrt,
-                        DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                        2,
-                        content,
-                    )
+                    .Recreate(&winrt, DirectXPixelFormat::R16G16B16A16Float, 2, content)
                     .map_err(|e| e.to_string())?;
                 size = content;
+                converter = None;
                 continue;
             }
             let surface: IDirect3DDxgiInterfaceAccess = frame
@@ -243,10 +248,32 @@ fn run(
             if desc.Width < content.Width as u32 || desc.Height < content.Height as u32 {
                 continue;
             }
+            if color_check.elapsed() >= Duration::from_secs(2) {
+                color = crate::color::DisplayColor::for_source(&source);
+                color_check = Instant::now();
+            }
+            if converter.is_none() {
+                converter = Some(
+                    crate::color::ColorConverter::new(
+                        &device,
+                        &context,
+                        content.Width as u32,
+                        content.Height as u32,
+                    )
+                    .map_err(|e| format!("Preview color conversion failed: {e}"))?,
+                );
+            }
+            let converter = converter.as_ref().unwrap();
+            if !converter
+                .copy(&input, color)
+                .map_err(|e| format!("Preview color conversion failed: {e}"))?
+            {
+                continue;
+            }
             renderer.update(
                 &device,
                 &context,
-                &input,
+                &converter.output,
                 content.Width as u32,
                 content.Height as u32,
                 channel,

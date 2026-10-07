@@ -49,4 +49,7 @@ pub use shortcut::{RecordingShortcut, ShortcutAction};
 #[cfg(target_os = "windows")]
 mod audio;
 #[cfg(target_os = "windows")]
-pub use audio::{AudioDevice, AudioInventory, audio_inventory};
+pub use audio::{AudioChannel, AudioDevice, AudioInventory, AudioMonitor, audio_inventory};
+
+#[cfg(target_os = "windows")]
+mod color;

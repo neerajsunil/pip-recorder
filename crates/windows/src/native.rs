@@ -39,6 +39,7 @@ pub struct Source {
     pub name: String,
     pub width: u32,
     pub height: u32,
+    pub(crate) target: Option<crate::color::CaptureTarget>,
 }
 
 impl Source {
@@ -49,6 +50,7 @@ impl Source {
             width: size.Width.max(0) as u32,
             height: size.Height.max(0) as u32,
             item,
+            target: None,
         })
     }
 }
@@ -108,6 +110,7 @@ pub fn timestamped_destination(directory: &Path) -> PathBuf {
     path
 }
 
+/// Startup failures can occur before the Slint window exists.
 pub fn show_details(hwnd: usize, message: &str) {
     unsafe {
         let _ = windows::Win32::UI::WindowsAndMessaging::MessageBoxW(
@@ -326,6 +329,8 @@ impl Recording {
         source: Source,
         config: RecordingConfig,
         preview: crate::PreviewChannel,
+        audio_feedback: crate::AudioChannel,
+        mut audio_monitor: Option<crate::AudioMonitor>,
         events: impl Fn(RecordingEvent) + Send + 'static,
     ) -> Result<Self, String> {
         config.validate()?;
@@ -334,6 +339,7 @@ impl Recording {
         let worker = thread::Builder::new()
             .name("fastrecorder-recording".into())
             .spawn(move || {
+                if let Some(monitor) = &mut audio_monitor { monitor.join(); }
                 // Keep initialization and cleanup on the same MTA thread.
                 let result =
                     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.map_err(|e| e.to_string());
@@ -347,7 +353,7 @@ impl Recording {
                             });
                         } else {
                             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                record(&source, &config, &worker_stop, &preview, &events)
+                                record(&source, &config, &worker_stop, &preview, &audio_feedback, &events)
                             })).unwrap_or_else(|_| Err(format!(
                                 "Recording stopped after an internal error. An incomplete file may remain in {}. See the local diagnostic log for details.",
                                 config.destination.parent().unwrap_or(Path::new(".")).display()
@@ -401,6 +407,20 @@ pub(crate) struct Capture {
     pub(crate) frame_token: Option<i64>,
     pub(crate) closed_token: Option<i64>,
 }
+
+/// Explicitly return WGC pool buffers on replacement, resize, error and stop.
+pub(crate) struct CapturedFrame(pub Direct3D11CaptureFrame);
+impl std::ops::Deref for CapturedFrame {
+    type Target = Direct3D11CaptureFrame;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl Drop for CapturedFrame {
+    fn drop(&mut self) {
+        let _ = self.0.Close();
+    }
+}
 impl Drop for Capture {
     fn drop(&mut self) {
         if let Some(token) = self.frame_token {
@@ -414,43 +434,21 @@ impl Drop for Capture {
     }
 }
 
-/// Conservative v1 policy: any connected HDR output blocks recording. WGC's
-/// selected window may span displays or move between them.
-fn ensure_sdr() -> Result<(), String> {
-    unsafe {
-        let factory: IDXGIFactory1 = CreateDXGIFactory1().map_err(|e| e.to_string())?;
-        let mut adapters = 0;
-        while let Ok(adapter) = factory.EnumAdapters1(adapters) {
-            adapters += 1;
-            let mut outputs = 0;
-            while let Ok(output) = adapter.EnumOutputs(outputs) {
-                outputs += 1;
-                let output: IDXGIOutput6 = output
-                    .cast()
-                    .map_err(|_| "Cannot verify the display color mode.".to_string())?;
-                let desc = output.GetDesc1().map_err(|e| e.to_string())?;
-                if desc.AttachedToDesktop.as_bool()
-                    && desc.ColorSpace != DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709
-                {
-                    return Err("This version records SDR only. Turn off HDR on your displays before recording.".into());
-                }
-            }
-        }
-        if adapters == 0 {
-            return Err("No graphics adapter is available.".into());
-        }
-    }
-    Ok(())
-}
-
 fn record(
     source: &Source,
     config: &RecordingConfig,
     stop: &AtomicBool,
     preview: &crate::PreviewChannel,
+    audio_feedback: &crate::AudioChannel,
     events: &impl Fn(RecordingEvent),
 ) -> Result<(), String> {
-    ensure_sdr()?;
+    if stop.load(Ordering::Acquire) {
+        events(RecordingEvent::Finished {
+            file: None,
+            error: None,
+        });
+        return Ok(());
+    }
     let directory = config
         .destination
         .parent()
@@ -481,17 +479,31 @@ fn record(
         .create_new(true)
         .open(&temporary)
         .map_err(|e| format!("Cannot write here: {e}"))?;
-    let result = record_inner(source, config, stop, preview, events, &temporary);
+    let result = record_inner(
+        source,
+        config,
+        stop,
+        preview,
+        audio_feedback,
+        events,
+        &temporary,
+    );
     match result {
         Ok((frames, warning)) if frames > 0 => {
-            move_without_overwrite(&temporary, &config.destination).map_err(|e| {
-                format!(
-                    "Recording saved at {}, but could not be moved: {e}",
-                    temporary.display()
-                )
-            })?;
+            let (file, warning) = match move_without_overwrite(&temporary, &config.destination) {
+                Ok(()) => (config.destination.clone(), warning),
+                Err(error) => (
+                    temporary.clone(),
+                    Some(format!(
+                        "{}The video is saved here because its destination could not be used: {error}",
+                        warning
+                            .map(|warning| format!("{warning} "))
+                            .unwrap_or_default()
+                    )),
+                ),
+            };
             events(RecordingEvent::Finished {
-                file: Some(config.destination.clone()),
+                file: Some(file),
                 error: warning,
             });
         }
@@ -499,10 +511,10 @@ fn record(
             let _ = std::fs::remove_file(&temporary);
             events(RecordingEvent::Finished {
                 file: None,
-                error: Some(
-                    warning
-                        .unwrap_or_else(|| "Recording stopped before any frames arrived.".into()),
-                ),
+                error: warning.or_else(|| {
+                    (!stop.load(Ordering::Acquire))
+                        .then(|| "Recording stopped before any frames arrived.".into())
+                }),
             });
         }
         Err(e) => {
@@ -524,17 +536,27 @@ fn record_inner(
     config: &RecordingConfig,
     stop: &AtomicBool,
     preview: &crate::PreviewChannel,
+    audio_feedback: &crate::AudioChannel,
     events: &impl Fn(RecordingEvent),
     temporary: &Path,
 ) -> Result<(u64, Option<String>), String> {
     let mut audio = if config.audio.enabled() {
-        Some(crate::audio::AudioRecording::start(
+        match crate::audio::AudioRecording::start(
             config.audio.clone(),
             temporary.with_extension("aac.partial"),
-        )?)
+            audio_feedback.clone(),
+            stop,
+        ) {
+            Ok(audio) => Some(audio),
+            Err(_) if stop.load(Ordering::Acquire) => return Ok((0, None)),
+            Err(error) => return Err(error),
+        }
     } else {
         None
     };
+    if stop.load(Ordering::Acquire) {
+        return Ok((0, None));
+    }
     let native = || -> WinResult<_> {
         unsafe {
             let (device, context) = crate::hardware::create_device(config.gpu_index)?;
@@ -606,11 +628,11 @@ fn record_inner(
         config.fps,
     )
     .map_err(|e| format!("GPU color conversion is unavailable: {e}"))?;
-    let latest = Arc::new(std::sync::Mutex::new(None::<Direct3D11CaptureFrame>));
+    let latest = Arc::new(std::sync::Mutex::new(None::<CapturedFrame>));
     let (wake_tx, wake_rx) = mpsc::sync_channel(1);
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
         &winrt,
-        DirectXPixelFormat::B8G8R8A8UIntNormalized,
+        DirectXPixelFormat::R16G16B16A16Float,
         3,
         source.item.Size().map_err(|e| e.to_string())?,
     )
@@ -631,6 +653,7 @@ fn record_inner(
         .FrameArrived(
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new(move |pool, _| {
                 if let Ok(frame) = pool.ok()?.TryGetNextFrame() {
+                    let frame = CapturedFrame(frame);
                     if let Ok(mut latest) = callback_latest.lock() {
                         *latest = Some(frame);
                     }
@@ -669,6 +692,8 @@ fn record_inner(
     let mut last_statistics = Instant::now();
     let mut capture_size = source.item.Size().map_err(|e| e.to_string())?;
     let mut frame_valid = false;
+    let mut color = crate::color::DisplayColor::for_source(source);
+    let mut last_tick = Instant::now();
     let gpu = unsafe {
         device
             .cast::<IDXGIDevice>()
@@ -703,6 +728,16 @@ fn record_inner(
     });
     let loop_result = (|| -> Result<(), String> {
         while !stop.load(Ordering::Acquire) && !closed.load(Ordering::Acquire) {
+            if written == 0 && Instant::now() > frame_wait_deadline {
+                return Err(
+                    "Recording could not start. Try another capture source or encoder.".into(),
+                );
+            }
+            // Don't synthesize minutes of catch-up audio/video after sleep or a stalled driver.
+            if last_tick.elapsed() > Duration::from_secs(2) {
+                return Err("Recording stopped after the computer slept or capture was interrupted. The recorded portion will be saved.".into());
+            }
+            last_tick = Instant::now();
             if let Some(error) = audio.as_ref().and_then(|audio| audio.failure()) {
                 return Err(error);
             }
@@ -729,12 +764,7 @@ fn record_inner(
                         drop(frame);
                         capture
                             .pool
-                            .Recreate(
-                                &winrt,
-                                DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                                3,
-                                content,
-                            )
+                            .Recreate(&winrt, DirectXPixelFormat::R16G16B16A16Float, 3, content)
                             .map_err(|e| e.to_string())?;
                         capture_size = content;
                         converter = Converter::new(
@@ -751,7 +781,10 @@ fn record_inner(
                         frame_wait_deadline = Instant::now() + Duration::from_secs(8);
                         continue;
                     }
-                    if !converter.copy_frame(&frame).map_err(|e| e.to_string())? {
+                    if !converter
+                        .copy_frame(&frame, color)
+                        .map_err(|e| e.to_string())?
+                    {
                         continue;
                     }
                     preview_renderer.update(
@@ -836,7 +869,9 @@ fn record_inner(
                         "Recording stopped because the drive is running out of space.".into(),
                     );
                 }
-                ensure_sdr()?;
+                unsafe { device.GetDeviceRemovedReason() }
+                    .map_err(|e| format!("The graphics device was disconnected or reset: {e}"))?;
+                color = crate::color::DisplayColor::for_source(source);
                 events(RecordingEvent::Statistics { dropped });
                 last_statistics = Instant::now();
             }
@@ -863,6 +898,10 @@ fn record_inner(
     if let Ok(mut latest) = latest.lock() {
         *latest = None;
     }
+    // Conversion and preview resources are no longer needed. Release them
+    // before buffered encoders allocate/process their final tail at Stop.
+    drop(converter);
+    drop(preview_renderer);
     let audio = audio.as_mut().map(|audio| {
         audio.finish(video_end * u64::from(crate::audio::RATE) / u64::from(config.fps))
     });
@@ -874,7 +913,7 @@ fn record_inner(
     if written == 0 {
         return Ok((0, warning));
     }
-    encoder
+    let finalization_warning = encoder
         .finalize(
             temporary,
             audio.as_ref().and_then(|audio| audio.track.as_ref()),
@@ -888,6 +927,10 @@ fn record_inner(
                     .unwrap_or_default()
             )
         })?;
+    let warning = match (warning, finalization_warning) {
+        (Some(recording), Some(finalization)) => Some(format!("{recording} {finalization}")),
+        (recording, finalization) => recording.or(finalization),
+    };
     Ok((written, warning))
 }
 
@@ -1114,11 +1157,15 @@ impl Output {
             },
         }
     }
-    fn finalize(self, path: &Path, audio: Option<&crate::audio::AudioTrack>) -> Result<(), String> {
+    fn finalize(
+        self,
+        path: &Path,
+        audio: Option<&crate::audio::AudioTrack>,
+    ) -> Result<Option<String>, String> {
         match self {
             Self::Nvenc(mut encoder) => encoder.finalize(audio),
-            Self::Intel(mut encoder) => encoder.finalize(audio),
-            Self::SoftwareAv1(mut encoder) => encoder.finalize(audio),
+            Self::Intel(mut encoder) => encoder.finalize(audio).map(|()| None),
+            Self::SoftwareAv1(mut encoder) => encoder.finalize(audio).map(|()| None),
             Self::Mf { writer, .. } => {
                 unsafe {
                     writer.Finalize().map_err(|e| e.to_string())?;
@@ -1127,7 +1174,7 @@ impl Output {
                 if let Some(audio) = audio {
                     crate::mp4::attach_audio(path, audio).map_err(|e| e.to_string())?;
                 }
-                Ok(())
+                Ok(None)
             }
         }
     }
@@ -1230,6 +1277,7 @@ struct Converter {
     enumerator: ID3D11VideoProcessorEnumerator,
     processor: ID3D11VideoProcessor,
     input: ID3D11Texture2D,
+    color: crate::color::ColorConverter,
     input_view: ID3D11VideoProcessorInputView,
     staging: Option<ID3D11Texture2D>,
     width: u32,
@@ -1264,15 +1312,8 @@ impl Converter {
             };
             let enumerator = video_device.CreateVideoProcessorEnumerator(&desc)?;
             let processor = video_device.CreateVideoProcessor(&enumerator, 0)?;
-            let input = texture(
-                device,
-                iw,
-                ih,
-                DXGI_FORMAT_B8G8R8A8_UNORM,
-                D3D11_USAGE_DEFAULT,
-                D3D11_BIND_RENDER_TARGET.0 as u32,
-                0,
-            )?;
+            let color = crate::color::ColorConverter::new(device, context, iw, ih)?;
+            let input = color.output.clone();
             let mut input_view = None;
             let desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
                 ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
@@ -1333,6 +1374,7 @@ impl Converter {
                 enumerator,
                 processor,
                 input,
+                color,
                 input_view: input_view.unwrap(),
                 staging: None,
                 width: ow,
@@ -1340,38 +1382,14 @@ impl Converter {
             })
         }
     }
-    fn copy_frame(&self, frame: &Direct3D11CaptureFrame) -> WinResult<bool> {
+    fn copy_frame(
+        &self,
+        frame: &Direct3D11CaptureFrame,
+        color: crate::color::DisplayColor,
+    ) -> WinResult<bool> {
         let surface = frame.Surface()?.cast::<IDirect3DDxgiInterfaceAccess>()?;
         let texture: ID3D11Texture2D = unsafe { surface.GetInterface()? };
-        unsafe {
-            let mut source = D3D11_TEXTURE2D_DESC::default();
-            let mut destination = D3D11_TEXTURE2D_DESC::default();
-            texture.GetDesc(&mut source);
-            self.input.GetDesc(&mut destination);
-            // An in-flight frame can still belong to the old pool after resize.
-            if source.Width < destination.Width || source.Height < destination.Height {
-                return Ok(false);
-            }
-            let content = D3D11_BOX {
-                left: 0,
-                top: 0,
-                front: 0,
-                right: destination.Width,
-                bottom: destination.Height,
-                back: 1,
-            };
-            self.context.CopySubresourceRegion(
-                &self.input,
-                0,
-                0,
-                0,
-                0,
-                &texture,
-                0,
-                Some(&content),
-            );
-        }
-        Ok(true)
+        self.color.copy(&texture, color)
     }
     fn convert(&self, sample: &IMFSample) -> WinResult<()> {
         unsafe {

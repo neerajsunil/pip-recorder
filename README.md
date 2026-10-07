@@ -34,6 +34,8 @@ Extract the Windows x64 ZIP, then open `fastrecorder.exe`. No account, subscript
 - Record a full display or an application window, with a live preview.
 - Include desktop sound, microphone audio, both, or neither.
 - Choose audio devices and adjust their recording volumes.
+- Check live desktop/microphone levels before and during recording, with device and microphone-permission guidance.
+- Capture HDR displays as ordinary SDR video, with the same GPU tone mapping in the preview.
 - Record **AV1, HEVC/H.265 or H.264** on supported NVIDIA and Intel GPUs; software H.264 and AV1 are also available.
 - Let Automatic choose the best available encoder, or choose it yourself.
 - Pick Recommended, High, Low or Custom bitrate, plus advanced quality controls.
@@ -76,7 +78,8 @@ FastRecorder uses **Rust**, **Slint**, **WGPU/Direct3D 12** for the UI, **Window
 flowchart LR
     UI[Slint studio · Rust] --> Core[Recording session]
     Core --> Capture[Windows Graphics Capture]
-    Capture --> Process[D3D11 · NV12 / BT.709 SDR]
+    Capture --> Color[FP16 scRGB · GPU SDR normalization / HDR tone mapping]
+    Color --> Process[D3D11 · NV12 / BT.709 SDR]
     Process --> Encode[NVENC / Quick Sync / software]
     Encode --> MP4[MP4 file]
     Capture --> Preview[Bounded live preview]
@@ -86,9 +89,9 @@ flowchart LR
     AAC --> MP4
 ```
 
-Windows Graphics Capture delivers D3D11 textures, so capture processing uses D3D11 even though UI rendering uses Direct3D 12. NVIDIA video pixels stay on the GPU; Intel and software encoding currently use bounded readback. The preview is limited to 960 × 540 at 12 fps and pauses while minimized. Audio uses a shared clock, bounded PCM storage, and stereo AAC-LC at 48 kHz/192 kbps. Enabled audio sources are mixed into one track.
+Windows Graphics Capture delivers D3D11 textures, so capture processing uses D3D11 even though UI rendering uses Direct3D 12. FP16 capture preserves HDR values until a GPU shader normalizes SDR white and maps HDR highlights into SDR; output remains 8-bit BT.709, not an HDR recording. NVIDIA video pixels stay on the GPU; Intel and software encoding currently use bounded readback. The preview is limited to 960 × 540 at 12 fps and pauses while minimized. Audio uses a shared clock, bounded PCM storage, and stereo AAC-LC at 48 kHz/192 kbps. Enabled audio sources are mixed into one track. Idle audio meters discard packets without saving sound and stop while the studio is minimized.
 
-For recording quality, NVENC defaults to P5/HQ, VBR, spatial AQ and quarter-resolution multipass, with optional CQP. Intel requests TU1 quality. FastRecorder has **not** been benchmarked as better than OBS. See [technical and development notes](docs/DEVELOPMENT.md) for bitrate tables, fallbacks, limitations and build instructions.
+For recording quality, NVENC defaults to P5/HQ, VBR, spatial AQ, quarter-resolution multipass, up to two B-frames and hardware lookahead, with optional CQP. B-frame references are enabled where supported; buffering is bounded and unsupported enhancements fall back automatically. Intel requests TU1 quality and up to three B-frames. FastRecorder has **not** been benchmarked as better than OBS. See [technical and development notes](docs/DEVELOPMENT.md) for bitrate tables, fallbacks, limitations and build instructions.
 
 ## Roadmap
 
@@ -96,8 +99,8 @@ For recording quality, NVENC defaults to P5/HQ, VBR, spatial AQ and quarter-reso
 - Crash-resilient recording files and recovery.
 - Region capture, output scaling, pause/resume and countdown.
 - AMD AV1/HEVC and GPU-resident Intel encoding.
-- Separate audio tracks, live mute and audio meters.
-- HDR handling, broader device testing and signed Windows distribution.
+- Separate audio tracks and live mute.
+- HDR output, broader device testing and signed Windows distribution.
 
 These are planned features, not availability promises. [Suggest a feature](https://github.com/neerajsunil/FastRecorder/issues/new?template=feature_request.yml) or [report a bug](https://github.com/neerajsunil/FastRecorder/issues/new?template=bug_report.yml).
 
