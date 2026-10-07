@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Restructure the workspace for maintainability and future platforms: portable `fastrecorder-core` and new `fastrecorder-mp4` crates, a `fastrecorder-platform` facade, and the Windows backend in `crates/platform-windows` split into `capture`, `pipeline`, `encode`, `audio` and shell modules. The app's controller is split into per-area `studio` modules and the UI into reusable Slint components and pages. See docs/ARCHITECTURE.md. No intended behavior change.
+- MP4 muxing now has structural tests (H.264/AV1 configuration, B-frame composition offsets, AAC interleaving and post-hoc attachment), and CI runs the workspace tests on Windows plus the portable crates on Linux x64/ARM64 and macOS.
+- A panic inside one UI callback no longer poisons the shared studio state for later callbacks.
 - NVENC Stop signals EOS before reading pending frames, and every output read waits for completion in the synchronous encoder session. Conversion/preview resources retire before encoder finalization. If flushing fails after video packets were saved, finalize the completed portion with a visible warning instead of leaving it without MP4 metadata; audio is limited to that portion. Errors name the NVENC operation/status and are retained in local diagnostics.
 - Recording and native-operation errors use short notices; Details opens the in-app Info panel with the full last issue. Timestamp failures include pending-frame context in the panel and local diagnostics.
 - Fix a recording abort when NVENC accepts a new buffered frame while older output is ready. Queued output retirement no longer treats the newest NEED_MORE_INPUT status as a full-queue failure; input rings reserve a larger B-frame/lookahead pipeline margin within the memory budget.

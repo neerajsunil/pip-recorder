@@ -115,7 +115,7 @@ cargo build -p fastrecorder --release --locked
 .\target\release\fastrecorder.exe
 ```
 
-Use `.\run.ps1 -SoftwareUI` for graphics troubleshooting. [CONTRIBUTING.md](CONTRIBUTING.md) explains the workflow; [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has deeper architecture and optional diagnostic commands.
+Use `.\run.ps1 -SoftwareUI` for graphics troubleshooting. [CONTRIBUTING.md](CONTRIBUTING.md) explains the workflow; [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) maps the workspace; [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has technical notes and optional diagnostic commands.
 
 ## Contribute and support
 

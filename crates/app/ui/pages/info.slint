@@ -1,0 +1,29 @@
+import { InfoLine } from "../components/labels.slint";
+
+// Settings → Info: technical details about hardware, encoders and the last recording.
+export component InfoPage inherits VerticalLayout {
+    in property <string> issue-detail;
+    in property <string> gpu-label;
+    in property <string> encoder-status;
+    in property <string> encoder-label;
+    in property <string> active-encoder;
+    in property <string> audio-details;
+    in property <string> recording-stats;
+    in property <string> renderer-label;
+    in property <string> encoder-tech;
+    in property <string> fallback-detail;
+    in property <string> hardware-details;
+    alignment: start; spacing: 16px;
+    if root.issue-detail != "": InfoLine { label: "Last issue"; value: root.issue-detail; }
+    InfoLine { label: "Selected GPU"; value: root.gpu-label; }
+    if root.encoder-status != "": InfoLine { label: "Encoder notes"; value: root.encoder-status; }
+    InfoLine { label: "Selected encoder"; value: root.encoder-label; }
+    InfoLine { label: "Verified encoder (last / current recording)"; value: root.active-encoder; }
+    InfoLine { label: "Audio (last / current recording)"; value: root.audio-details; }
+    InfoLine { label: "Recording statistics"; value: root.recording-stats; }
+    InfoLine { label: "Video pipeline"; value: "Windows Graphics Capture FP16 scRGB → GPU SDR normalization / HDR tone mapping → D3D11 video processor → NV12 / BT.709 SDR 8-bit → MP4"; }
+    InfoLine { label: "UI renderer / preview"; value: root.renderer-label + " · preview ≤ 960 × 540 at 12 fps, paused while minimized"; }
+    InfoLine { label: "Encoder configuration"; value: root.encoder-tech; }
+    InfoLine { label: "Startup fallback"; value: root.fallback-detail; }
+    InfoLine { label: "Detected capabilities"; value: root.hardware-details; }
+}

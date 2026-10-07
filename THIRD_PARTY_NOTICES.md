@@ -6,8 +6,8 @@ FastRecorder source is licensed GPL-3.0-only. Dependency and vendored-file licen
 |---|---|---|
 | Slint | UI, rendering and compiler | GPL-3.0-only option; [Slint](https://github.com/slint-ui/slint) |
 | Lucide | UI icons | ISC; [local notice](crates/app/ui/icons/LICENSE) |
-| NVIDIA Video Codec API declarations | NVENC ABI | NVIDIA permissive notice and MIT adaptation; [local provenance/licenses](crates/windows/src/nvenc_api/README.md) |
-| Intel oneVPL / Media SDK headers | Native bridge ABI | MIT; [local license](crates/windows/vendor/INTEL-LICENSE), [provenance](crates/windows/vendor/README.md) |
+| NVIDIA Video Codec API declarations | NVENC ABI | NVIDIA permissive notice and MIT adaptation; [local provenance/licenses](crates/platform-windows/src/encode/nvenc/api/README.md) |
+| Intel oneVPL / Media SDK headers | Native bridge ABI | MIT; [local license](crates/platform-windows/vendor/INTEL-LICENSE), [provenance](crates/platform-windows/vendor/README.md) |
 | rav1e | Software AV1 | BSD-2-Clause; [rav1e](https://github.com/xiph/rav1e) |
 | Rust Windows bindings | Windows API access | MIT or Apache-2.0; [windows-rs](https://github.com/microsoft/windows-rs) |
 | WGPU | GPU UI rendering | MIT or Apache-2.0; [wgpu](https://github.com/gfx-rs/wgpu) |

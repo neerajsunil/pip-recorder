@@ -8,6 +8,10 @@ For a small fix, open a pull request. For a new backend, encoding change or sign
 
 The default studio should be understandable without technical knowledge. Put encoder/vendor details, rate control and diagnostics in Settings/Info. Keep recording work away from the UI thread and keep buffers bounded. A buildable UI on another platform does not establish recording support; update the README platform table only when the complete backend and release are verified.
 
+## Where code lives
+
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) maps every directory and says where new code belongs. Keep logic that needs no OS API in `crates/core` or `crates/mp4`, so it is tested on every platform. The app must use `fastrecorder-platform`, not a backend crate directly.
+
 ## Setup and checks
 
 Windows contributors need stable Rust, the MSVC x64 toolchain, Visual Studio C++ Build Tools and a Windows SDK. Clone the repository and build with the committed lockfile:

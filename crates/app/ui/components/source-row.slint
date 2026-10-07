@@ -1,0 +1,18 @@
+import { FieldLabel } from "labels.slint";
+
+// One selectable display or application window in the source picker.
+export component SourceRow inherits Rectangle {
+    in property <string> name; in property <string> detail;
+    in property <bool> selected; in property <bool> enabled: true;
+    callback clicked();
+    height: 62px; border-radius: 7px;
+    background: selected ? #343047 : touch.has-hover ? #2d313b : #242831;
+    border-width: focus.has-focus ? 2px : 1px; border-color: selected || focus.has-focus ? #8778dd : #383d49;
+    accessible-role: button; accessible-label: name; accessible-enabled: enabled; forward-focus: focus;
+    VerticalLayout { padding: 12px; spacing: 4px;
+        Text { text: root.name; color: #edf0f8; font-size: 13px; overflow: elide; }
+        FieldLabel { text: root.detail; overflow: elide; }
+    }
+    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; } return reject; } }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}

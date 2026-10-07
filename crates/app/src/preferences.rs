@@ -59,7 +59,7 @@ impl Default for Preferences {
 }
 impl Preferences {
     pub fn load() -> Result<Self, String> {
-        let path = fastrecorder_windows::preferences_path()?;
+        let path = fastrecorder_platform::preferences_path()?;
         match std::fs::read(&path) {
             Ok(bytes) => {
                 let value: Self = serde_json::from_slice(&bytes)
@@ -128,6 +128,6 @@ impl Preferences {
     }
     pub fn save(&self) -> Result<(), String> {
         let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
-        fastrecorder_windows::save_preferences(&bytes)
+        fastrecorder_platform::save_preferences(&bytes)
     }
 }

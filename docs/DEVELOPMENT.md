@@ -38,14 +38,18 @@ Capture requests borderless Windows Graphics Capture access once per process and
 
 This foundation records SDR video at the original source resolution, with optional cursor and audio capture. The preview is GPU-downscaled to at most 960 × 540 at 12 fps, then read back for Slint. Its queue contains only the latest image. Preview processing pauses when the studio is minimized, its preview is hidden, or a settings/source panel is open. Recording stays at the selected 30/60 fps and source resolution. While recording, preview shares the recording capture instead of starting a second capture session.
 
-HDR input follows Microsoft's [FP16 capture guidance](https://learn.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture). `color.hlsl` is compiled and embedded during a Windows build, then runs on the capture device without CPU video readback. Linear scRGB is normalized using the source monitor's [SDR reference white](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/high-dynamic-range); a fixed highlight shoulder maps HDR into SDR before sRGB conversion. This is a pragmatic SDR output path, not a reference HDR mastering transform. It preserves one white reference per captured source, so windows spanning differently configured monitors require visual validation.
+HDR input follows Microsoft's [FP16 capture guidance](https://learn.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture). `crates/platform-windows/src/capture/color.hlsl` is compiled and embedded during a Windows build, then runs on the capture device without CPU video readback. Linear scRGB is normalized using the source monitor's [SDR reference white](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/high-dynamic-range); a fixed highlight shoulder maps HDR into SDR before sRGB conversion. This is a pragmatic SDR output path, not a reference HDR mastering transform. It preserves one white reference per captured source, so windows spanning differently configured monitors require visual validation.
 
 
 ## Architecture
 
-- `fastrecorder-app`: compiled Slint UI, WGPU/Direct3D UI rendering, an embedded display/window selector, native save dialog, session commands and status. UI updates arrive through Slint's event loop. The elapsed-time timer runs only during a session; a bounded preview consumer runs at 12 Hz. GPU UI initialization errors retry with a software renderer in a fresh process; `-SoftwareUI` selects it explicitly.
-- `fastrecorder-core`: platform-independent configuration, lifecycle state, and rational frame scheduling. No OS or graphics dependencies.
-- `fastrecorder-windows`: Windows Graphics Capture, D3D11 video processing, a bounded Media Foundation sample allocator, direct NVIDIA NVENC and Intel Quick Sync (AV1 / HEVC / H.264), Windows software H.264, Rust rav1e software AV1, WASAPI/AAC audio, MP4 muxing and native global shortcuts. Native objects stay inside this crate. One recording thread owns the D3D immediate context; capture callbacks only replace the latest frame and wake it. A separate audio thread owns its COM endpoints, bounded mixer and AAC transform.
+The workspace layout, layering rules and how to add a platform backend are in [ARCHITECTURE.md](ARCHITECTURE.md). In summary:
+
+- `fastrecorder` (`crates/app`): compiled Slint UI, WGPU/Direct3D UI rendering, an embedded display/window selector, native save dialog, session commands and status. UI updates arrive through Slint's event loop. The elapsed-time timer runs only during a session; a bounded preview consumer runs at 12 Hz. GPU UI initialization errors retry with a software renderer in a fresh process; `-SoftwareUI` selects it explicitly. It reaches native code only through `fastrecorder-platform`.
+- `fastrecorder-core` (`crates/core`): platform-independent configuration, lifecycle state, bitrate policy and rational frame scheduling. No OS or graphics dependencies.
+- `fastrecorder-mp4` (`crates/mp4`): portable AV1/HEVC/H.264 + AAC MP4 writer, tested on every CI host.
+- `fastrecorder-platform` (`crates/platform`): re-exports the backend for the target OS.
+- `fastrecorder-windows` (`crates/platform-windows`): Windows Graphics Capture, D3D11 video processing, a bounded Media Foundation sample allocator, direct NVIDIA NVENC and Intel Quick Sync (AV1 / HEVC / H.264), Windows software H.264, Rust rav1e software AV1, WASAPI/AAC audio and native global shortcuts. Native objects stay inside this crate. One recording thread owns the D3D immediate context; capture callbacks only replace the latest frame and wake it. A separate audio thread owns its COM endpoints, bounded mixer and AAC transform.
 
 The capture worker copies into an owned BGRA texture, scales / letterboxes into the initial fixed canvas, and converts to NV12 using D3D11 video processing. GPU samples are leased from Media Foundation's bounded allocator, preventing texture reuse while the encoder still holds them. Static screens repeat the latest copied frame on a monotonic 30/60 fps grid. Overload skips ticks rather than accumulating an unbounded queue.
 
@@ -75,7 +79,7 @@ Free space is checked before recording and every two seconds during recording; b
 ## Validation
 
 ```powershell
-cargo test --workspace
+cargo test --workspace   # includes MP4 structure tests that need no GPU
 cargo clippy --workspace --all-targets --features diagnostics -- -D warnings
 cargo fmt --all --check
 

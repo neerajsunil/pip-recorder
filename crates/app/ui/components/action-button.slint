@@ -1,0 +1,24 @@
+// Icon/text button with hover, focus and keyboard activation.
+export component ActionButton inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> has-icon: true;
+    in property <string> label: text;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    callback clicked();
+    forward-focus: focus;
+    accessible-role: button; accessible-label: label; accessible-enabled: enabled;
+    border-radius: 7px;
+    background: !enabled ? #242730 : danger ? (touch.has-hover ? #ce4053 : #b93547) : primary ? (touch.has-hover ? #6e60dc : #5d50c6) : (touch.has-hover ? #343844 : #292d37);
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? #a99eff : primary || danger ? transparent : #3a3e49;
+    opacity: enabled ? 1 : 0.5;
+    animate background { duration: 100ms; }
+    height: 36px;
+    if root.has-icon: Image { source: root.icon; width: 18px; height: 18px; x: root.text == "" ? (root.width - 18px) / 2 : 12px; y: (root.height - 18px) / 2; colorize: root.primary || root.danger ? #ffffff : #c5c8d3; }
+    if root.text != "": Text { x: root.has-icon ? 38px : 10px; width: root.width - self.x - 10px; height: root.height; text: root.text; color: #eef0f6; font-size: 13px; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
+    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; } return reject; } }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
