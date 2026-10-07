@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.2.0-alpha.1 — 2026-10-08
+
+FastRecorder is now **Pip**, a friendly screen recorder with a new look, simple and advanced settings, and a much lighter live preview. Still a Windows x64 preview release. The repository moved to `neerajsunil/pip-recorder`; the old address redirects. The executable and settings folder keep the `fastrecorder` name, so existing settings carry over.
+
+- New identity: Pip the camera mascot, a light pastel theme and a midnight dark theme. Follows the Windows light/dark setting by default (System, Light or Dark in Settings → Appearance), including the title bar.
+- Settings switch between **Simple** (quality, smoothness, size, format, mouse pointer, countdown, after-save action) and **Advanced**, which replaces those choices with the exact controls behind them: frame rate, output size, GPU, format then encoder, VBR/CBR/CQP, bitrate and peak bitrate, keyframe interval, NVIDIA preset, tuning, multipass, look-ahead, spatial/temporal AQ and B-frames, software AV1 speed, audio bitrate, file-name pattern, process priority and automatic stop.
+- New options: output scaling to 2160p/1440p/1080p/720p, H.264 "Plays everywhere" format, 3/5/10 s countdown, show or play the file after saving, file-name patterns, process priority and stop-after timers.
+- The studio shows where recordings are saved, with Open folder and Change…; duplicate buttons are gone.
+- Native GPU live preview at up to 30 fps with no CPU copies; SDR displays are captured as 8-bit BGRA. Idle use drops from about 360 MB and two-thirds of a CPU core to about 110 MB and a few percent; recording memory drops by about a quarter.
+- Better quality defaults: higher bitrate table, NVENC P5 with spatial AQ and quarter-resolution multipass; look-ahead is opt-in.
+- Fix a purple flash over Settings the first time it opens.
+- Faster development builds with a `fast` Cargo profile (`.\run.ps1 -Fast`).
+
+### Earlier unreleased work, included in 0.2.0-alpha.1
+
 - Restructure the workspace for maintainability and future platforms: portable `fastrecorder-core` and new `fastrecorder-mp4` crates, a `fastrecorder-platform` facade, and the Windows backend in `crates/platform-windows` split into `capture`, `pipeline`, `encode`, `audio` and shell modules. The app's controller is split into per-area `studio` modules and the UI into reusable Slint components and pages. See docs/ARCHITECTURE.md. No intended behavior change.
 - MP4 muxing now has structural tests (H.264/AV1 configuration, B-frame composition offsets, AAC interleaving and post-hoc attachment), and CI runs the workspace tests on Windows plus the portable crates on Linux x64/ARM64 and macOS.
 - A panic inside one UI callback no longer poisons the shared studio state for later callbacks.

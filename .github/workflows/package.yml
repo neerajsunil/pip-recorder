@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Package version (for example 0.1.0-alpha.1)'
+        description: 'Package version (for example 0.2.0-alpha.1)'
         required: true
-        default: '0.1.0-alpha.1'
+        default: '0.2.0-alpha.1'
 permissions:
   contents: read
 jobs:
@@ -27,7 +27,7 @@ jobs:
         run: ./scripts/package-windows.ps1 -Version $env:PACKAGE_VERSION
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: FastRecorder-windows-x64
+          name: Pip-windows-x64
           path: |
             dist/*.zip
             dist/*.sha256

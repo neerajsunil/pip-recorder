@@ -78,7 +78,7 @@ export component AudioPage inherits VerticalLayout {
         ActionButton { width: 104px; height: 32px; pill: true; text: "Refresh"; icon: @image-url("../icons/refresh-cw.svg"); icon-size: 15px; enabled: !root.busy; clicked => { root.refresh-audio-devices(); } }
     }
     if root.advanced: Divider { }
-    if root.advanced: SettingGroup { title: "Audio encoding"; advanced: true;
+    if root.advanced: SettingGroup { title: "Audio encoding";
         SettingRow { title: "Audio quality"; description: "Stereo AAC at 48 kHz. Both sources are mixed into one track.";
             ComboBox { model: ["96 kbps · smallest", "128 kbps", "160 kbps", "192 kbps · best"]; enabled: !root.busy;
                 current-index: root.audio-bitrate == 96 ? 0 : root.audio-bitrate == 128 ? 1 : root.audio-bitrate == 160 ? 2 : 3;

@@ -1233,7 +1233,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fastrecorder"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "fastrecorder-core",
  "fastrecorder-platform",
@@ -1249,25 +1249,25 @@ dependencies = [
 
 [[package]]
 name = "fastrecorder-core"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 
 [[package]]
 name = "fastrecorder-mp4"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "fastrecorder-core",
 ]
 
 [[package]]
 name = "fastrecorder-platform"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "fastrecorder-windows",
 ]
 
 [[package]]
 name = "fastrecorder-windows"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "cc",
  "fastrecorder-core",

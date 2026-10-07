@@ -54,12 +54,13 @@ pub fn snapshot(ui: MainWindow, path: &Path, view: &str) -> Result<(), Box<dyn s
                 .into()
             };
             ui.set_gpu_names(model(&["Automatic", "NVIDIA GeForce RTX 4070"]));
-            ui.set_encoder_names(model(&[
-                "Automatic · best available",
-                "NVIDIA AV1",
-                "NVIDIA HEVC",
-                "NVIDIA H.264",
+            ui.set_codec_names(model(&[
+                "Automatic · smallest",
+                "AV1",
+                "HEVC · H.265",
+                "H.264 · plays everywhere",
             ]));
+            ui.set_encoder_label("NVIDIA NVENC · AV1".into());
             ui.set_nvenc_controls(true);
             ui.set_keyframe_controls(true);
             settings(0, true);

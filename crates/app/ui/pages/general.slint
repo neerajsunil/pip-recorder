@@ -2,13 +2,11 @@ import { Theme, Brand } from "../theme.slint";
 import { Divider, FieldLabel } from "../components/labels.slint";
 import { IconSegmented } from "../components/segmented.slint";
 import { SettingGroup, SettingRow } from "../components/setting-row.slint";
-import { Switch } from "../components/switch.slint";
 
-// Settings → Appearance: theme and how much detail Settings shows.
+// Settings → Appearance: theme and version.
 export component GeneralPage inherits VerticalLayout {
     in property <string> app-version;
     in-out property <int> theme-mode;
-    in-out property <bool> show-advanced;
     callback settings-changed();
     alignment: start; spacing: 22px;
     SettingGroup { title: "Appearance";
@@ -18,12 +16,6 @@ export component GeneralPage inherits VerticalLayout {
                 current: root.theme-mode;
                 selected(index) => { root.theme-mode = index; root.settings-changed(); }
             }
-        }
-    }
-    Divider { }
-    SettingGroup { title: "Settings";
-        SettingRow { title: "Show advanced options"; description: "Adds encoder, bitrate, frame-rate and audio-quality controls for people who like to tweak. The basics stay the same.";
-            Switch { text: ""; checked <=> root.show-advanced; toggled => { root.settings-changed(); } }
         }
     }
     Divider { }
