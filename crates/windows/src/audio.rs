@@ -8,10 +8,10 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use windows::{
     Win32::{
@@ -39,6 +39,128 @@ pub struct AudioDevice {
 pub struct AudioInventory {
     pub desktop: Vec<AudioDevice>,
     pub microphones: Vec<AudioDevice>,
+}
+
+/// One small shared channel; no PCM or device handles cross into the UI.
+#[derive(Clone, Default)]
+pub struct AudioChannel(Arc<AudioFeedback>);
+#[derive(Default)]
+struct AudioFeedback {
+    peaks: [AtomicU32; 2],
+    errors: Mutex<[Option<String>; 2]>,
+}
+impl AudioChannel {
+    fn peak(&self, desktop: bool, value: f32) {
+        self.0.peaks[usize::from(!desktop)].fetch_max(value.to_bits(), Ordering::Relaxed);
+    }
+    fn error(&self, desktop: bool, error: String) {
+        if let Ok(mut errors) = self.0.errors.lock() {
+            errors[usize::from(!desktop)] = Some(error);
+        }
+    }
+    pub fn take_peaks(&self) -> [f32; 2] {
+        std::array::from_fn(|index| f32::from_bits(self.0.peaks[index].swap(0, Ordering::Relaxed)))
+    }
+    pub fn errors(&self) -> [Option<String>; 2] {
+        self.0
+            .errors
+            .lock()
+            .map(|errors| errors.clone())
+            .unwrap_or_default()
+    }
+}
+
+/// Metering only: packets are discarded, never recorded or played back.
+pub struct AudioMonitor {
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+impl AudioMonitor {
+    pub fn start(config: AudioConfig, feedback: AudioChannel) -> Result<Self, String> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let worker = thread::Builder::new()
+            .name("fastrecorder-audio-meters".into())
+            .spawn(move || {
+                let run = || -> Result<(), String> {
+                    let _apartment = Apartment::new().map_err(|e| e.to_string())?;
+                    let mut endpoints = Vec::new();
+                    for (enabled, desktop, id, volume) in [
+                        (
+                            config.desktop,
+                            true,
+                            config.desktop_device.as_deref(),
+                            config.desktop_volume,
+                        ),
+                        (
+                            config.microphone,
+                            false,
+                            config.microphone_device.as_deref(),
+                            config.microphone_volume,
+                        ),
+                    ] {
+                        if worker_stop.load(Ordering::Acquire) {
+                            return Ok(());
+                        }
+                        if enabled {
+                            match Endpoint::open(id, desktop, volume) {
+                                Ok(endpoint) => endpoints.push(endpoint),
+                                Err(error) => feedback.error(desktop, error),
+                            }
+                        }
+                    }
+                    let mut ring = Mixer::new();
+                    while !worker_stop.load(Ordering::Acquire) && !endpoints.is_empty() {
+                        endpoints.retain(|endpoint| {
+                            match endpoint.drain(0, &mut ring, &feedback) {
+                                Ok(()) => true,
+                                Err(error) => {
+                                    feedback.error(endpoint.desktop, error);
+                                    false
+                                }
+                            }
+                        });
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                    Ok(())
+                };
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run))
+                    .unwrap_or_else(|_| {
+                        Err("Audio meters stopped. Refresh audio devices to try again.".into())
+                    });
+                if let Err(error) = result {
+                    if config.desktop {
+                        feedback.error(true, error.clone());
+                    }
+                    if config.microphone {
+                        feedback.error(false, error);
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            stop,
+            worker: Some(worker),
+        })
+    }
+    pub fn join(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !worker.is_finished() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if worker.is_finished() {
+                let _ = worker.join();
+            }
+            // A broken endpoint driver must not hold recording startup or app exit hostage.
+        }
+    }
+}
+impl Drop for AudioMonitor {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+    }
 }
 
 struct Apartment;
@@ -145,6 +267,7 @@ struct Endpoint {
     weights: Vec<[f32; 2]>,
     gain: f32,
     name: String,
+    desktop: bool,
 }
 impl Endpoint {
     fn open(id: Option<&str>, desktop: bool, volume: u32) -> Result<Self, String> {
@@ -239,15 +362,11 @@ impl Endpoint {
                     weights,
                     gain: volume as f32 / 100.,
                     name,
+                    desktop,
                 })
             }
         };
-        create().map_err(|e| {
-            format!(
-                "Could not open {} audio: {e}",
-                if desktop { "desktop" } else { "microphone" }
-            )
-        })
+        create().map_err(|e| endpoint_error(desktop, &e))
     }
     fn sample(&self, bytes: &[u8], frame: usize) -> [f32; 2] {
         let mut output = [0.; 2];
@@ -280,13 +399,13 @@ impl Endpoint {
         }
         output
     }
-    fn drain(&self, epoch: u64, ring: &mut Mixer) -> Result<(), String> {
+    fn drain(&self, epoch: u64, ring: &mut Mixer, feedback: &AudioChannel) -> Result<(), String> {
         for _ in 0..64 {
             unsafe {
                 if self
                     .capture
                     .GetNextPacketSize()
-                    .map_err(|e| e.to_string())?
+                    .map_err(|e| endpoint_error(self.desktop, &e))?
                     == 0
                 {
                     break;
@@ -303,9 +422,28 @@ impl Endpoint {
                         None,
                         Some(&mut timestamp),
                     )
-                    .map_err(|e| format!("{} disconnected or capture failed: {e}", self.name))?;
+                    .map_err(|e| endpoint_error(self.desktop, &e))?;
                 let result = (|| -> Result<(), String> {
-                    if epoch == 0 || frames == 0 {
+                    if frames == 0 {
+                        return Ok(());
+                    }
+                    if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 {
+                        return Ok(());
+                    }
+                    if data.is_null() {
+                        return Err("Audio device returned an empty packet.".into());
+                    }
+                    let bytes = std::slice::from_raw_parts(
+                        data,
+                        frames as usize * self.channels * self.bytes,
+                    );
+                    let peak = (0..frames as usize).fold(0.0f32, |peak, frame| {
+                        self.sample(bytes, frame)
+                            .into_iter()
+                            .fold(peak, |peak, sample| peak.max(sample.abs()))
+                    });
+                    feedback.peak(self.desktop, peak);
+                    if epoch == 0 {
                         return Ok(());
                     }
                     if flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR.0 as u32 != 0 || timestamp == 0 {
@@ -323,16 +461,6 @@ impl Endpoint {
                             self.name
                         ));
                     }
-                    if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 {
-                        return Ok(());
-                    }
-                    if data.is_null() {
-                        return Err("Audio device returned an empty packet.".into());
-                    }
-                    let bytes = std::slice::from_raw_parts(
-                        data,
-                        frames as usize * self.channels * self.bytes,
-                    );
                     let first = (start.ceil().max(0.) as u64).max(ring.cursor);
                     let last = (end.ceil().max(0.) as u64).min(ring.cursor + RING_FRAMES as u64);
                     for index in first..last {
@@ -359,6 +487,21 @@ impl Endpoint {
             }
         }
         Ok(())
+    }
+}
+
+fn endpoint_error(desktop: bool, error: &windows::core::Error) -> String {
+    let source = if desktop {
+        "Desktop audio"
+    } else {
+        "Microphone"
+    };
+    match error.code().0 as u32 {
+        0x80070005 if !desktop => "Microphone access is blocked. Enable microphone access for desktop apps in Windows Settings → Privacy & security → Microphone, then refresh audio devices.".into(),
+        0x80070490 | 0x88890004 | 0x88890026 => format!("{source} device is unavailable or disconnected. Choose a connected device in Settings → Audio, then refresh."),
+        0x8889000a => format!("{source} device is busy. Close apps using it exclusively, then refresh audio devices."),
+        0x88890010 => "Windows Audio is not running. Start the Windows Audio service, then refresh audio devices.".into(),
+        _ => format!("Could not use {source}: {error}. Check the selected device in Settings → Audio."),
     }
 }
 impl Drop for Endpoint {
@@ -569,7 +712,12 @@ pub(crate) struct AudioRecording {
     pub description: String,
 }
 impl AudioRecording {
-    pub fn start(config: AudioConfig, path: PathBuf) -> Result<Self, String> {
+    pub fn start(
+        config: AudioConfig,
+        path: PathBuf,
+        feedback: AudioChannel,
+        cancelled: &AtomicBool,
+    ) -> Result<Self, String> {
         let epoch = Arc::new(AtomicU64::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let end = Arc::new(AtomicU64::new(0));
@@ -590,15 +738,16 @@ impl AudioRecording {
                             config.desktop_device.as_deref(),
                             true,
                             config.desktop_volume,
-                        )?);
+                        ).inspect_err(|error| feedback.error(true, error.clone()))?);
                     }
                     if config.microphone {
                         endpoints.push(Endpoint::open(
                             config.microphone_device.as_deref(),
                             false,
                             config.microphone_volume,
-                        )?);
+                        ).inspect_err(|error| feedback.error(false, error.clone()))?);
                     }
+                    if worker_stop.load(Ordering::Acquire) { return Err("Audio startup was cancelled.".into()); }
                     let encoder = AacEncoder::new(&path)
                         .map_err(|e| format!("Could not initialize AAC audio: {e}"))?;
                     Ok((apartment, media, endpoints, encoder))
@@ -629,13 +778,16 @@ impl AudioRecording {
                     while !worker_stop.load(Ordering::Acquire) {
                         let epoch = worker_epoch.load(Ordering::Acquire);
                         for endpoint in &endpoints {
-                            endpoint.drain(epoch, &mut ring)?;
+                            endpoint.drain(epoch, &mut ring, &feedback).inspect_err(|error| feedback.error(endpoint.desktop, error.clone()))?;
                         }
                         if epoch != 0 {
                             let due = qpc_time().map_err(|e| e.to_string())?.saturating_sub(epoch)
                                 * u64::from(RATE)
                                 / 10_000_000;
                             let ready = due.saturating_sub(4_800); // 100 ms margin for late endpoint packets.
+                            if ready.saturating_sub(ring.cursor) > RING_FRAMES as u64 {
+                                return Err("Recording stopped after an audio timing interruption. The recorded portion will be saved. Avoid putting the computer to sleep while recording.".into());
+                            }
                             while ring.cursor + BLOCK <= ready {
                                 let first = ring.cursor;
                                 encoder.encode(&ring.take(BLOCK), first, BLOCK)?;
@@ -645,9 +797,13 @@ impl AudioRecording {
                     }
                     let epoch = worker_epoch.load(Ordering::Acquire);
                     for endpoint in &endpoints {
-                        endpoint.drain(epoch, &mut ring)?;
+                        // A lost endpoint must not prevent already-buffered audio from being flushed.
+                        let _ = endpoint.drain(epoch, &mut ring, &feedback);
                     }
                     let end = worker_end.load(Ordering::Acquire);
+                    if end.saturating_sub(ring.cursor) > RING_FRAMES as u64 {
+                        return Err("Audio ended after a timing interruption; the recorded portion has been retained.".into());
+                    }
                     while ring.cursor < end {
                         let first = ring.cursor;
                         let count = BLOCK.min(end - first);
@@ -692,7 +848,26 @@ impl AudioRecording {
                 AudioCompletion { track, error }
             })
             .map_err(|e| e.to_string())?;
-        match receiver.recv().map_err(|e| e.to_string())? {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let setup = loop {
+            if cancelled.load(Ordering::Acquire) {
+                stop.store(true, Ordering::Release);
+                return Err("Audio startup was cancelled.".into());
+            }
+            match receiver.recv_timeout(Duration::from_millis(100)) {
+                Ok(setup) => break setup,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if Instant::now() < deadline => {
+                    continue;
+                }
+                Err(error) => {
+                    stop.store(true, Ordering::Release);
+                    return Err(format!(
+                        "Audio could not start: {error}. Refresh audio devices or disable the affected audio source."
+                    ));
+                }
+            }
+        };
+        match setup {
             Ok(description) => Ok(Self {
                 epoch,
                 stop,

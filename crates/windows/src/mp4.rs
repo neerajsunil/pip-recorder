@@ -12,6 +12,7 @@ pub(crate) struct Av1Mp4 {
     mdat: u64,
     sizes: Vec<u32>,
     timestamps: Vec<u64>,
+    decode_timestamps: Vec<u64>,
     keys: Vec<u32>,
     width: u32,
     height: u32,
@@ -160,6 +161,9 @@ fn configuration(data: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 impl Av1Mp4 {
+    pub fn sample_count(&self) -> usize {
+        self.sizes.len()
+    }
     pub fn new_codec(
         path: &Path,
         width: u32,
@@ -197,6 +201,7 @@ impl Av1Mp4 {
             mdat,
             sizes: Vec::new(),
             timestamps: Vec::new(),
+            decode_timestamps: Vec::new(),
             keys: Vec::new(),
             width,
             height,
@@ -205,12 +210,22 @@ impl Av1Mp4 {
         })
     }
     pub fn write(&mut self, packet: &[u8], timestamp: u64, key: bool) -> io::Result<()> {
+        self.write_timed(packet, timestamp, timestamp, key)
+    }
+    /// Samples arrive in decode order; presentation timestamps can be reordered.
+    pub fn write_timed(
+        &mut self,
+        packet: &[u8],
+        presentation: u64,
+        decode: u64,
+        key: bool,
+    ) -> io::Result<()> {
         if self
-            .timestamps
+            .decode_timestamps
             .last()
-            .is_some_and(|last| timestamp <= *last)
+            .is_some_and(|last| decode <= *last)
         {
-            return Err(invalid("Video output timestamps must increase"));
+            return Err(invalid("Video decode timestamps must increase"));
         }
         let mut sample = Vec::with_capacity(packet.len());
         if self.codec == Codec::Av1 {
@@ -243,7 +258,8 @@ impl Av1Mp4 {
         self.sizes.push(
             u32::try_from(sample.len()).map_err(|_| invalid("Video sample exceeds MP4 limit"))?,
         );
-        self.timestamps.push(timestamp);
+        self.timestamps.push(presentation);
+        self.decode_timestamps.push(decode);
         if key || self.sizes.len() == 1 {
             self.keys.push(self.sizes.len() as u32);
         }
@@ -254,6 +270,68 @@ impl Av1Mp4 {
         fps: u32,
         audio: Option<&crate::audio::AudioTrack>,
     ) -> io::Result<()> {
+        if self.timestamps.is_empty() || fps == 0 {
+            return Err(invalid("Video requires samples and a nonzero time scale"));
+        }
+        // A captured frame remains visible until the next PRESENTED frame,
+        // even when the capture clock skips ticks. Associate that duration with
+        // its sample, then build the MP4 decode clock in packet order. Using
+        // submission-order gaps as stts durations would make B-frames overlap
+        // or leave holes on the display timeline after a skipped capture frame.
+        let mut presentation_order: Vec<usize> = (0..self.timestamps.len()).collect();
+        presentation_order.sort_unstable_by_key(|index| self.timestamps[*index]);
+        let mut durations = vec![1u32; self.timestamps.len()];
+        for pair in presentation_order.windows(2) {
+            let delta = self.timestamps[pair[1]] - self.timestamps[pair[0]];
+            if delta == 0 {
+                return Err(invalid("Duplicate video presentation timestamp"));
+            }
+            durations[pair[0]] = u32::try_from(delta)
+                .map_err(|_| invalid("Video sample duration exceeds MP4 limit"))?;
+        }
+        let mut decode_clock = 0u64;
+        let mut decode_times = Vec::with_capacity(durations.len());
+        for delta in &durations {
+            decode_times.push(decode_clock);
+            decode_clock = decode_clock
+                .checked_add(u64::from(*delta))
+                .ok_or_else(|| invalid("Video decode duration overflow"))?;
+        }
+        // Keep ctts unsigned for player compatibility. Shift presentation times
+        // enough to represent reordered frames, then remove that artificial
+        // delay with a video edit list. Audio retains its original shared clock.
+        let shift = self
+            .timestamps
+            .iter()
+            .zip(&decode_times)
+            .map(|(presentation, decode)| decode.saturating_sub(*presentation))
+            .max()
+            .unwrap_or(0);
+        let offsets: Vec<u32> = self
+            .timestamps
+            .iter()
+            .zip(&decode_times)
+            .map(|(presentation, decode)| {
+                let offset = presentation
+                    .checked_add(shift)
+                    .and_then(|pts| pts.checked_sub(*decode))
+                    .ok_or_else(|| invalid("Invalid video composition timestamp"))?;
+                u32::try_from(offset)
+                    .map_err(|_| invalid("Video composition offset exceeds MP4 limit"))
+            })
+            .collect::<io::Result<_>>()?;
+        let duration = self
+            .timestamps
+            .iter()
+            .max()
+            .unwrap()
+            .checked_add(1)
+            .ok_or_else(|| invalid("Video duration overflow"))?;
+        let media_duration = decode_clock.max(
+            duration
+                .checked_add(shift)
+                .ok_or_else(|| invalid("Video duration overflow"))?,
+        );
         let audio_offset = self.file.stream_position()?;
         if let Some(audio) = audio {
             copy_audio(&mut self.file, audio)?;
@@ -262,17 +340,6 @@ impl Av1Mp4 {
         self.file.seek(SeekFrom::Start(self.mdat + 8))?;
         self.file.write_all(&(end - self.mdat).to_be_bytes())?;
         self.file.seek(SeekFrom::Start(end))?;
-        let durations: Vec<u32> = self
-            .timestamps
-            .iter()
-            .enumerate()
-            .map(|(i, value)| {
-                self.timestamps
-                    .get(i + 1)
-                    .map_or(1, |next| (next - value).min(u32::MAX as u64) as u32)
-            })
-            .collect();
-        let duration: u64 = durations.iter().map(|v| u64::from(*v)).sum();
         let mut mvhd = vec![0; 16];
         mvhd.extend(words(&[fps]));
         mvhd.extend(duration.to_be_bytes());
@@ -290,7 +357,7 @@ impl Av1Mp4 {
         tkhd.extend(words(&[self.width << 16, self.height << 16]));
         let mut mdhd = vec![0; 16];
         mdhd.extend(words(&[fps]));
-        mdhd.extend(duration.to_be_bytes());
+        mdhd.extend(media_duration.to_be_bytes());
         mdhd.extend([0x55, 0xc4, 0, 0]);
         let hdlr = full(
             b"hdlr",
@@ -348,9 +415,33 @@ impl Av1Mp4 {
             0,
             &[words(&[1]), (self.mdat + 16).to_be_bytes().to_vec()].concat(),
         );
+        let mut composition = Vec::new();
+        if offsets.iter().any(|offset| *offset != 0) {
+            let mut runs: Vec<(u32, u32)> = Vec::new();
+            for offset in offsets {
+                match runs.last_mut() {
+                    Some((count, old)) if *old == offset => *count += 1,
+                    _ => runs.push((1, offset)),
+                }
+            }
+            let mut ctts = words(&[runs.len() as u32]);
+            for (count, offset) in runs {
+                ctts.extend(words(&[count, offset]));
+            }
+            composition = full(b"ctts", 0, &ctts);
+        }
         let stbl = atom(
             b"stbl",
-            &[stsd, full(b"stts", 0, &stts), stsc, stsz, co64, stss].concat(),
+            &[
+                stsd,
+                full(b"stts", 0, &stts),
+                composition,
+                stsc,
+                stsz,
+                co64,
+                stss,
+            ]
+            .concat(),
         );
         let dinf = atom(
             b"dinf",
@@ -361,7 +452,30 @@ impl Av1Mp4 {
             b"mdia",
             &[full(b"mdhd", 0x01000000, &mdhd), hdlr, minf].concat(),
         );
-        let trak = atom(b"trak", &[full(b"tkhd", 0x01000003, &tkhd), mdia].concat());
+        let edit = if shift != 0 {
+            let media_time =
+                i64::try_from(shift).map_err(|_| invalid("Video edit time exceeds MP4 limit"))?;
+            atom(
+                b"edts",
+                &full(
+                    b"elst",
+                    0x01000000,
+                    &[
+                        words(&[1]),
+                        duration.to_be_bytes().to_vec(),
+                        media_time.to_be_bytes().to_vec(),
+                        words(&[0x10000]),
+                    ]
+                    .concat(),
+                ),
+            )
+        } else {
+            Vec::new()
+        };
+        let trak = atom(
+            b"trak",
+            &[full(b"tkhd", 0x01000003, &tkhd), edit, mdia].concat(),
+        );
         let mut movie = [full(b"mvhd", 0x01000000, &mvhd), trak].concat();
         if let Some(audio) = audio {
             movie.extend(audio_trak(audio, audio_offset, 2, duration, fps));

@@ -25,6 +25,15 @@ component ActionButton inherits Rectangle {
     touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
 }
 component FieldLabel inherits Text { color: #a2a8b9; font-size: 12px; }
+component AudioMeter inherits Rectangle {
+    in property <float> level;
+    in property <bool> enabled: true;
+    in property <bool> failed: false;
+    width: 72px; height: 5px; border-radius: 2px; background: #363c49;
+    accessible-role: progress-indicator;
+    accessible-label: failed ? "Audio device unavailable" : "Audio level";
+    Rectangle { width: parent.width * min(1, max(0, root.level)); height: parent.height; border-radius: 2px; background: root.failed || root.level >= 0.99 ? #ed7888 : root.level > 0.85 ? #e8bc70 : #81c3aa; opacity: root.enabled ? 1 : 0; }
+}
 component InfoLine inherits VerticalLayout {
     in property <string> label;
     in property <string> value;
@@ -108,12 +117,17 @@ export component MainWindow inherits Window {
     in property <bool> audio-ready: false;
     in property <string> audio-status: "Loading audio devices…";
     in property <string> audio-details: "Not recording";
+    in property <float> desktop-level: 0;
+    in property <float> microphone-level: 0;
+    in property <string> desktop-audio-error;
+    in property <string> microphone-audio-error;
     in-out property <int> settings-page: 0;
     in-out property <bool> software-encoder: false;
     in property <int> session-state: 0;
     in property <string> elapsed: "00:00";
     in property <string> notice: "";
     in property <bool> notice-error: false;
+    in property <string> issue-detail: "";
     in property <string> encoder-label: "Detecting encoders…";
     in property <string> renderer-label: "WGPU · Direct3D 12";
     in property <string> gpu-label: "Detecting graphics adapters…";
@@ -167,9 +181,15 @@ export component MainWindow inherits Window {
         }
         HorizontalLayout { height: 32px; spacing: 20px;
             CheckBox { text: "Desktop audio"; checked <=> root.desktop-audio; enabled: !root.busy; toggled => { root.settings-changed(); } }
+            AudioMeter { level: root.desktop-level; enabled: root.desktop-audio; failed: root.desktop-audio-error != ""; }
             CheckBox { text: "Microphone"; checked <=> root.microphone-audio; enabled: !root.busy; toggled => { root.settings-changed(); } }
+            AudioMeter { level: root.microphone-level; enabled: root.microphone-audio; failed: root.microphone-audio-error != ""; }
             Rectangle { horizontal-stretch: 1; }
             ActionButton { width: 32px; height: 32px; icon: @image-url("icons/settings-2.svg"); label: "Audio devices"; clicked => { root.settings-page = 1; root.settings-open = true; root.info-open = false; root.source-open = false; } }
+        }
+        if (root.desktop-audio && root.desktop-audio-error != "") || (root.microphone-audio && root.microphone-audio-error != ""): HorizontalLayout { height: 26px; spacing: 10px;
+            Text { text: root.microphone-audio && root.microphone-audio-error != "" ? "Check your microphone in Audio settings." : "Check your desktop audio in Audio settings."; color: #f0b980; vertical-alignment: center; horizontal-stretch: 1; }
+            ActionButton { width: 110px; height: 26px; text: "Audio settings"; has-icon: false; clicked => { root.settings-page = 1; root.settings-open = true; root.info-open = false; } }
         }
         Rectangle { height: 1px; background: #323640; }
         HorizontalLayout { height: 48px; spacing: 16px;
@@ -283,6 +303,8 @@ export component MainWindow inherits Window {
                                     ActionButton { width: 32px; height: 32px; icon: @image-url("icons/refresh-cw.svg"); label: "Refresh audio devices"; enabled: !root.busy; clicked => { root.refresh-audio-devices(); } }
                                 }
                                 CheckBox { text: "Record desktop audio"; checked <=> root.desktop-audio; enabled: !root.busy; toggled => { root.settings-changed(); } }
+                                AudioMeter { width: 200px; level: root.desktop-level; enabled: root.desktop-audio; failed: root.desktop-audio-error != ""; }
+                                if root.desktop-audio && root.desktop-audio-error != "": Text { text: root.desktop-audio-error; color: #f0b980; wrap: word-wrap; font-size: 12px; }
                                 VerticalLayout { spacing: 7px;
                                     FieldLabel { text: "Playback device"; }
                                     ComboBox { model: root.desktop-audio-devices; current-index <=> root.desktop-audio-device; enabled: !root.busy && root.audio-ready; selected => { root.settings-changed(); } }
@@ -294,6 +316,8 @@ export component MainWindow inherits Window {
                                 Rectangle { height: 1px; background: #373d49; }
                                 Text { text: "Microphone"; color: #e9ecf4; font-size: 15px; font-weight: 600; }
                                 CheckBox { text: "Record microphone"; checked <=> root.microphone-audio; enabled: !root.busy; toggled => { root.settings-changed(); } }
+                                AudioMeter { width: 200px; level: root.microphone-level; enabled: root.microphone-audio; failed: root.microphone-audio-error != ""; }
+                                if root.microphone-audio && root.microphone-audio-error != "": Text { text: root.microphone-audio-error; color: #f0b980; wrap: word-wrap; font-size: 12px; }
                                 VerticalLayout { spacing: 7px;
                                     FieldLabel { text: "Input device"; }
                                     ComboBox { model: root.microphone-audio-devices; current-index <=> root.microphone-audio-device; enabled: !root.busy && root.audio-ready; selected => { root.settings-changed(); } }
@@ -337,13 +361,14 @@ export component MainWindow inherits Window {
                                 FieldLabel { text: "FastRecorder " + root.app-version; }
                             }
                             if root.info-open: VerticalLayout { alignment: start; spacing: 16px;
+                                if root.issue-detail != "": InfoLine { label: "Last issue"; value: root.issue-detail; }
                                 InfoLine { label: "Selected GPU"; value: root.gpu-label; }
                                 if root.encoder-status != "": InfoLine { label: "Encoder notes"; value: root.encoder-status; }
                                 InfoLine { label: "Selected encoder"; value: root.encoder-label; }
                                 InfoLine { label: "Verified encoder (last / current recording)"; value: root.active-encoder; }
                                 InfoLine { label: "Audio (last / current recording)"; value: root.audio-details; }
                                 InfoLine { label: "Recording statistics"; value: root.recording-stats; }
-                                InfoLine { label: "Video pipeline"; value: "Windows Graphics Capture → D3D11 video processor → NV12 / BT.709 SDR 8-bit → MP4"; }
+                                InfoLine { label: "Video pipeline"; value: "Windows Graphics Capture FP16 scRGB → GPU SDR normalization / HDR tone mapping → D3D11 video processor → NV12 / BT.709 SDR 8-bit → MP4"; }
                                 InfoLine { label: "UI renderer / preview"; value: root.renderer-label + " · preview ≤ 960 × 540 at 12 fps, paused while minimized"; }
                                 InfoLine { label: "Encoder configuration"; value: root.encoder-tech; }
                                 InfoLine { label: "Startup fallback"; value: root.fallback-detail; }

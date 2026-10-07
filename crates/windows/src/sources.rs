@@ -62,6 +62,10 @@ impl SourceCandidate {
         .map_err(|e| e.to_string())?;
         let mut source = Source::from_item(item).map_err(|e| e.to_string())?;
         source.name = self.name.clone();
+        source.target = Some(match self.target {
+            Target::Display(handle) => crate::color::CaptureTarget::Monitor(handle),
+            Target::Window { handle, .. } => crate::color::CaptureTarget::Window(handle),
+        });
         Ok(source)
     }
 }

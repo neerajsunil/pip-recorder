@@ -25,7 +25,7 @@ pub struct RecordingConfig {
     pub audio: AudioConfig,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AudioConfig {
     pub desktop: bool,
     pub microphone: bool,

@@ -33,8 +33,8 @@ impl SoftwareAv1 {
             den: u64::from(recording.fps),
         };
         encoder.bitrate = (recording.bitrate_for(Codec::Av1, width, height) * 1_000_000) as i32;
-        // rav1e uses this flag to disable reordered frames; the current muxer
-        // requires presentation order. Quality uses speed 8 and bounded lookahead.
+        // Keep CPU cost bounded for real-time software capture. Hardware encoders
+        // use reordered frames; rav1e retains speed 8 and eight-frame RDO analysis.
         encoder.low_latency = true;
         encoder.max_key_frame_interval = u64::from(recording.fps * recording.keyframe_seconds);
         encoder.speed_settings.rdo_lookahead_frames = 8;
